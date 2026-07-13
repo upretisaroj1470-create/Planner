@@ -1298,31 +1298,50 @@ async function refreshSlack(){
     const channelNames = SLACK_CHANNELS.split(',').map(c=>c.trim()).filter(Boolean);
 
     // Get channel list via proxy
-    const listData = await slackFetch('conversations.list?types=public_channel,private_channel,im,mpim&limit=200&exclude_archived=true');
-    if (!listData.ok) throw new Error(listData.error || 'Auth failed — check your token');
+    // Fetch channels and DMs separately for reliability
+    const [chanData, imData, mpimData] = await Promise.all([
+      slackFetch('conversations.list?types=public_channel,private_channel&limit=100&exclude_archived=true'),
+      slackFetch('conversations.list?types=im&limit=30'),
+      slackFetch('conversations.list?types=mpim&limit=20'),
+    ]);
 
-    const allChannels = listData.channels || [];
+    if (!chanData.ok) throw new Error(chanData.error || 'Auth failed — check your token');
 
-    // For DMs, fetch user info to get display names
-    const dms = allChannels.filter(c => c.is_im || c.is_mpim);
-    const dmUserMap = {};
-    for (const dm of dms.slice(0, 20)){
-      if (dm.user){
-        try {
-          const uData = await slackFetch('users.info?user=' + dm.user);
-          if (uData.ok) dmUserMap[dm.id] = uData.user.real_name || uData.user.name || 'DM';
-        } catch(ue){ dmUserMap[dm.id] = 'DM'; }
-      }
+    const allChannels = [
+      ...(chanData.channels || []),
+      ...(imData.channels  || []),
+      ...(mpimData.channels || []),
+    ];
+
+    // Resolve DM user names in one batch call
+    const dmList = allChannels.filter(c => c.is_im && c.user);
+    if (dmList.length > 0){
+      try {
+        const usersData = await slackFetch('users.list?limit=200');
+        if (usersData.ok){
+          const userMap = {};
+          (usersData.members || []).forEach(u => { userMap[u.id] = u.real_name || u.name || 'DM'; });
+          dmList.forEach(c => { c.name = userMap[c.user] || 'DM'; });
+        }
+      } catch(ue){ dmList.forEach(c => { c.name = c.name || 'DM'; }); }
     }
-    // Add display name to DMs
-    allChannels.forEach(c => {
-      if (c.is_im) c.name = dmUserMap[c.id] || 'DM';
-      if (c.is_mpim) c.name = c.name || 'Group DM';
+    // Name group DMs
+    allChannels.filter(c => c.is_mpim).forEach(c => {
+      c.name = c.name ? c.name.split('--').join(' · ') : 'Group DM';
     });
 
-    const channels = channelNames.length
-      ? allChannels.filter(c => channelNames.includes(c.name) && (c.is_member !== false))
-      : allChannels.filter(c => c.is_member !== false).slice(0, 10);
+    // Filter: if channel names specified use those, otherwise show
+    // joined channels + ALL DMs that have messages (priority on DMs)
+    let channels;
+    if (channelNames.length){
+      channels = allChannels.filter(c =>
+        channelNames.includes(c.name) || channelNames.includes('#'+c.name)
+      );
+    } else {
+      const regularChans = allChannels.filter(c => !c.is_im && !c.is_mpim && c.is_member).slice(0, 6);
+      const dms          = allChannels.filter(c => c.is_im || c.is_mpim).slice(0, 10);
+      channels = [...dms, ...regularChans];
+    }
 
     if (!channels.length){
       feedEl.innerHTML = '<div class="empty"><div class="empty-icon">💬</div><div class="empty-txt">No matching channels found.<br>Check channel names in settings.</div></div>';
