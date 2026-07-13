@@ -1354,23 +1354,31 @@ async function refreshSlack(){
       try {
         const histData = await slackFetch(`conversations.history?channel=${ch.id}&limit=3`);
         if (!histData.ok) continue;
-        (histData.messages || []).forEach(m => {
-          feedItems.push({
-            channel: ch.name,
-            channelId: ch.id,
-            text: m.text || '',
-            ts: m.ts,
-            unread: ch.unread_count || 0,
-            isDM: !!(ch.is_im || ch.is_mpim),
-          });
+        // Only take the latest message per channel — use channel's unread_count
+      const msgs = histData.messages || [];
+      if (msgs.length > 0){
+        const latest = msgs[0]; // already sorted newest first by Slack
+        feedItems.push({
+          channel: ch.name,
+          channelId: ch.id,
+          text: latest.text || '',
+          ts: latest.ts,
+          unread: ch.unread_count || 0,
+          isDM: !!(ch.is_im || ch.is_mpim),
         });
+      }
       } catch(ce){ continue; }
     }
 
-    feedItems.sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
-    slackData = feedItems;
+    // Sort: within each channel take only the latest message
+    // Then separate into unread vs read, each sorted newest first
+    const unread = feedItems.filter(m => m.unread > 0)
+                            .sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
+    const read   = feedItems.filter(m => !m.unread)
+                            .sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
+    slackData = [...unread, ...read];
 
-    // Badge
+    // Badge — total unread count across all channels
     const totalUnread = channels.reduce((s,c) => s+(c.unread_count||0), 0);
     const badge = document.getElementById('msg-badge');
     if (badge){ if (totalUnread > 0){ badge.style.display=''; badge.textContent=totalUnread; } else badge.style.display='none'; }
@@ -1401,7 +1409,7 @@ function renderSlackFeed(){
     const chanLabel = isDM ? '👤 ' + m.channel : '# ' + m.channel;
     const chanColor = isDM ? 'var(--green)' : 'var(--purple)';
     const msgId = 'msg-' + m.ts.replace('.','');
-    return `<div style="padding:9px 12px;border-bottom:1px solid var(--border)">
+    return `<div style="padding:9px 12px;border-bottom:1px solid var(--border);background:${bgColor}">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
         <span style="font-size:11px;font-weight:700;color:${chanColor};cursor:pointer" onclick="openLink('${chUrl}')">${chanLabel}</span>
         <div style="display:flex;align-items:center;gap:6px">
