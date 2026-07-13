@@ -267,7 +267,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 
     <!-- Launch buttons -->
     <div style="display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border)">
-      <div style="flex:1;position:relative">
+      <div id="gchat-wrapper" style="flex:1;position:relative">
         <button onclick="toggleGChatMenu()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;font-size:12px;font-weight:500;color:var(--text)">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" fill="#1a73e8"/><circle cx="7" cy="11" r="1.5" fill="#fff"/><circle cx="12" cy="11" r="1.5" fill="#fff"/><circle cx="17" cy="11" r="1.5" fill="#fff"/></svg>
           Google Chat ▾
@@ -287,7 +287,26 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
     <!-- Slack feed -->
     <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
       <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Slack Messages</div>
-      <button onclick="refreshSlack()" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;color:var(--text2)">Refresh</button>
+      <div style="display:flex;gap:5px">
+        <button onclick="openCompose()" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--accent);color:#fff;cursor:pointer">✏️ New</button>
+        <button onclick="refreshSlack()" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;color:var(--text2)">Refresh</button>
+      </div>
+    </div>
+
+    <!-- Compose box (hidden by default) -->
+    <div id="compose-box" style="display:none;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--surface2)">
+      <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:6px">New Message</div>
+      <div style="margin-bottom:6px">
+        <input id="compose-to" placeholder="Channel or @person (e.g. general or @john)" style="width:100%;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);color:var(--text);font-size:12px;outline:none">
+      </div>
+      <div style="display:flex;gap:6px">
+        <textarea id="compose-text" rows="2" placeholder="Type a message..." style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);color:var(--text);font-size:12px;outline:none;resize:none;font-family:var(--font)"></textarea>
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <button onclick="sendCompose()" style="padding:6px 10px;background:var(--accent);color:#fff;border:none;border-radius:var(--r);cursor:pointer;font-size:12px;font-weight:500">Send</button>
+          <button onclick="closeCompose()" style="padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;font-size:12px;color:var(--text2)">Cancel</button>
+        </div>
+      </div>
+      <div id="compose-status" style="font-size:11px;margin-top:5px;color:var(--green)"></div>
     </div>
     <div class="tasks-wrap" id="slack-feed">
       <div class="empty" id="slack-empty">
@@ -356,7 +375,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
         <div class="config-field">
           <label>Slack User OAuth Token</label>
           <input type="text" id="slack-token" placeholder="xoxp-xxxxxxxxxxxx-xxxxxxxxxxxx">
-          <small>slack.com/apps → Build → Create App → OAuth & Permissions → add channels:history, channels:read scopes → install → copy User Token</small>
+          <small>Needs scopes: channels:read, channels:history, groups:read, groups:history, im:read, im:history, mpim:read, mpim:history, users:read — add all in OAuth & Permissions</small>
         </div>
         <div class="config-field">
           <label>Channels to watch (comma separated)</label>
@@ -1125,6 +1144,117 @@ let slackData       = [];
 
 function openLink(url){ window.open(url, '_blank'); }
 
+// ── Compose new message ───────────────────────────────────────
+function openCompose(){
+  document.getElementById('compose-box').style.display = 'block';
+  document.getElementById('compose-to').focus();
+}
+function closeCompose(){
+  document.getElementById('compose-box').style.display = 'none';
+  document.getElementById('compose-to').value = '';
+  document.getElementById('compose-text').value = '';
+  document.getElementById('compose-status').textContent = '';
+}
+
+async function sendCompose(){
+  const to   = document.getElementById('compose-to').value.trim();
+  const text = document.getElementById('compose-text').value.trim();
+  const status = document.getElementById('compose-status');
+  if (!to || !text){ status.style.color='var(--red)'; status.textContent='Enter a recipient and message'; return; }
+  if (!SLACK_TOKEN){ status.style.color='var(--red)'; status.textContent='No Slack token — check settings'; return; }
+
+  status.textContent = 'Sending...'; status.style.color = 'var(--text3)';
+
+  try {
+    // Resolve channel — could be a name like "general" or "@username"
+    let channelId = to;
+    if (!to.startsWith('C') && !to.startsWith('D') && !to.startsWith('G')){
+      // Look up by name
+      const listData = await slackFetch('conversations.list?types=public_channel,private_channel,im,mpim&limit=200');
+      const found = (listData.channels||[]).find(c => c.name === to.replace('#','').replace('@',''));
+      if (found){ channelId = found.id; }
+      else {
+        // Try user lookup for @mentions
+        const uList = await slackFetch('users.list');
+        const user = (uList.members||[]).find(u => u.name === to.replace('@','') || u.real_name.toLowerCase() === to.replace('@','').toLowerCase());
+        if (user){
+          // Open DM with user
+          const dmR = await slackPost('conversations.open', {users: user.id});
+          if (dmR.ok) channelId = dmR.channel.id;
+        }
+      }
+    }
+
+    const result = await slackPost('chat.postMessage', { channel: channelId, text });
+    if (result.ok){
+      status.style.color = 'var(--green)';
+      status.textContent = '✓ Sent!';
+      setTimeout(()=>{ closeCompose(); refreshSlack(); }, 1200);
+    } else {
+      throw new Error(result.error);
+    }
+  } catch(e){
+    status.style.color = 'var(--red)';
+    status.textContent = 'Error: ' + e.message;
+  }
+}
+
+// ── Reply in thread ───────────────────────────────────────────
+function openReply(channelId, channelName, ts, msgId){
+  // Close any other open reply boxes
+  document.querySelectorAll('[id^="msg-"]').forEach(el => {
+    if (el.id !== msgId) el.style.display = 'none';
+  });
+  const box = document.getElementById(msgId);
+  if (box){ box.style.display = box.style.display === 'none' ? 'block' : 'none'; }
+  setTimeout(()=>{ const t=document.getElementById('reply-text-'+msgId); if(t) t.focus(); }, 50);
+}
+function closeReply(msgId){
+  const box = document.getElementById(msgId);
+  if (box) box.style.display = 'none';
+}
+
+async function sendReply(channelId, ts, msgId){
+  const textEl   = document.getElementById('reply-text-' + msgId);
+  const statusEl = document.getElementById('reply-status-' + msgId);
+  const text = textEl ? textEl.value.trim() : '';
+  if (!text){ statusEl.style.color='var(--red)'; statusEl.textContent='Type a message first'; return; }
+  statusEl.textContent = 'Sending...'; statusEl.style.color = 'var(--text3)';
+  try {
+    const result = await slackPost('chat.postMessage', {
+      channel: channelId,
+      text,
+      thread_ts: ts,   // reply in thread
+    });
+    if (result.ok){
+      statusEl.style.color = 'var(--green)';
+      statusEl.textContent = '✓ Replied!';
+      if (textEl) textEl.value = '';
+      setTimeout(()=>{ closeReply(msgId); refreshSlack(); }, 1200);
+    } else {
+      throw new Error(result.error);
+    }
+  } catch(e){
+    statusEl.style.color = 'var(--red)';
+    statusEl.textContent = 'Error: ' + e.message;
+  }
+}
+
+// ── Slack POST helper ─────────────────────────────────────────
+async function slackPost(method, body){
+  const url   = 'https://slack.com/api/' + method;
+  const proxy = 'https://corsproxy.io/?' + encodeURIComponent(url);
+  const r = await fetch(proxy, {
+    method: 'POST',
+    headers:{
+      'Authorization': 'Bearer ' + SLACK_TOKEN,
+      'Content-Type': 'application/json; charset=utf-8',
+    },
+    body: JSON.stringify(body),
+  });
+  return r.json();
+}
+
 function toggleGChatMenu(){
   const m = document.getElementById('gchat-menu');
   m.style.display = m.style.display === 'none' ? 'block' : 'none';
@@ -1136,7 +1266,9 @@ function hideGChatMenu(){
 // Close menu if clicking outside
 document.addEventListener('click', function(e){
   const menu = document.getElementById('gchat-menu');
-  if (menu && !menu.closest('div').contains(e.target)) hideGChatMenu();
+  if (!menu) return;
+  const wrapper = document.getElementById('gchat-wrapper');
+  if (wrapper && !wrapper.contains(e.target)) hideGChatMenu();
 });
 
 async function slackFetch(endpoint){
@@ -1166,13 +1298,31 @@ async function refreshSlack(){
     const channelNames = SLACK_CHANNELS.split(',').map(c=>c.trim()).filter(Boolean);
 
     // Get channel list via proxy
-    const listData = await slackFetch('conversations.list?types=public_channel,private_channel&limit=200&exclude_archived=true');
+    const listData = await slackFetch('conversations.list?types=public_channel,private_channel,im,mpim&limit=200&exclude_archived=true');
     if (!listData.ok) throw new Error(listData.error || 'Auth failed — check your token');
 
     const allChannels = listData.channels || [];
+
+    // For DMs, fetch user info to get display names
+    const dms = allChannels.filter(c => c.is_im || c.is_mpim);
+    const dmUserMap = {};
+    for (const dm of dms.slice(0, 20)){
+      if (dm.user){
+        try {
+          const uData = await slackFetch('users.info?user=' + dm.user);
+          if (uData.ok) dmUserMap[dm.id] = uData.user.real_name || uData.user.name || 'DM';
+        } catch(ue){ dmUserMap[dm.id] = 'DM'; }
+      }
+    }
+    // Add display name to DMs
+    allChannels.forEach(c => {
+      if (c.is_im) c.name = dmUserMap[c.id] || 'DM';
+      if (c.is_mpim) c.name = c.name || 'Group DM';
+    });
+
     const channels = channelNames.length
-      ? allChannels.filter(c => channelNames.includes(c.name) && c.is_member)
-      : allChannels.filter(c => c.is_member).slice(0, 8);
+      ? allChannels.filter(c => channelNames.includes(c.name) && (c.is_member !== false))
+      : allChannels.filter(c => c.is_member !== false).slice(0, 10);
 
     if (!channels.length){
       feedEl.innerHTML = '<div class="empty"><div class="empty-icon">💬</div><div class="empty-txt">No matching channels found.<br>Check channel names in settings.</div></div>';
@@ -1192,6 +1342,7 @@ async function refreshSlack(){
             text: m.text || '',
             ts: m.ts,
             unread: ch.unread_count || 0,
+            isDM: !!(ch.is_im || ch.is_mpim),
           });
         });
       } catch(ce){ continue; }
@@ -1227,13 +1378,30 @@ function renderSlackFeed(){
     const text = m.text.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').trim();
     const short = text.length > 80 ? text.slice(0,80)+'…' : text;
     const chUrl = `https://${ws}/archives/${m.channelId}`;
-    return `<div onclick="openLink('${chUrl}')" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+    const isDM = m.isDM;
+    const chanLabel = isDM ? '👤 ' + m.channel : '# ' + m.channel;
+    const chanColor = isDM ? 'var(--green)' : 'var(--purple)';
+    const msgId = 'msg-' + m.ts.replace('.','');
+    return `<div style="padding:9px 12px;border-bottom:1px solid var(--border)">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
-        <span style="font-size:11px;font-weight:700;color:var(--purple)">#${m.channel}</span>
-        <span style="font-size:10px;color:var(--text3)">${date} ${time}</span>
+        <span style="font-size:11px;font-weight:700;color:${chanColor};cursor:pointer" onclick="openLink('${chUrl}')">${chanLabel}</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:10px;color:var(--text3)">${date} ${time}</span>
+          <button onclick="openReply('${m.channelId}','${m.channel}','${m.ts}','${msgId}')" style="font-size:10px;padding:2px 6px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;color:var(--text2)">↩ Reply</button>
+        </div>
       </div>
-      <div style="font-size:12px;color:var(--text);line-height:1.4">${esc(short) || '<em style="color:var(--text3)">attachment or media</em>'}</div>
+      <div style="font-size:12px;color:var(--text);line-height:1.4;cursor:pointer" onclick="openLink('${chUrl}')">${esc(short) || '<em style="color:var(--text3)">attachment or media</em>'}</div>
       ${m.unread ? `<div style="font-size:10px;color:var(--accent);margin-top:2px">${m.unread} unread</div>` : ''}
+      <div id="${msgId}" style="display:none;margin-top:7px">
+        <div style="display:flex;gap:6px">
+          <textarea rows="2" id="reply-text-${msgId}" placeholder="Reply in thread..." style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);color:var(--text);font-size:12px;outline:none;resize:none;font-family:var(--font)"></textarea>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <button onclick="sendReply('${m.channelId}','${m.ts}','${msgId}')" style="padding:6px 10px;background:var(--accent);color:#fff;border:none;border-radius:var(--r);cursor:pointer;font-size:12px">Send</button>
+            <button onclick="closeReply('${msgId}')" style="padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;font-size:12px;color:var(--text2)">✕</button>
+          </div>
+        </div>
+        <div id="reply-status-${msgId}" style="font-size:11px;margin-top:4px;color:var(--green)"></div>
+      </div>
     </div>`;
   }).join('');
 }
