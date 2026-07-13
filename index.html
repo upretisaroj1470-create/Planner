@@ -303,17 +303,17 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 
       <!-- Outlook Calendar -->
       <div class="config-section">
-        <div class="config-section-title">📆 Outlook Calendar</div>
-        <button class="auth-btn" id="outlook-auth-btn" onclick="connectOutlook()">
+        <div class="config-section-title">📆 Outlook Calendar (ICS feed)</div>
+        <div class="config-field">
+          <label>Outlook ICS URL</label>
+          <input type="text" id="outlook-ics-url" placeholder="https://outlook.office365.com/owa/calendar/.../calendar.ics">
+          <small>Outlook → Settings ⚙️ → View all settings → Calendar → Shared calendars → Publish → copy ICS link</small>
+        </div>
+        <button class="auth-btn" id="outlook-auth-btn" onclick="connectOutlookICS()">
           <span class="auth-icon">📆</span>
-          <span id="outlook-auth-label">Connect Outlook Calendar</span>
+          <span id="outlook-auth-label">Load Outlook Calendar</span>
           <span class="auth-status" id="outlook-auth-status"></span>
         </button>
-        <div class="config-field">
-          <label>Azure App (Client) ID</label>
-          <input type="text" id="outlook-client-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-          <small>Get it free: portal.azure.com → App registrations → New → add Calendar.Read permission</small>
-        </div>
       </div>
 
       <button class="save-btn" onclick="saveConfig()">Save &amp; Apply</button>
@@ -384,6 +384,7 @@ let API_URL       = localStorage.getItem('planner_api_url') || '';
 let GCAL_CLIENT_ID  = localStorage.getItem('gcal_client_id') || '';
 let GCAL_CAL_ID     = localStorage.getItem('gcal_cal_id') || 'primary';
 let OUTLOOK_CLIENT_ID = localStorage.getItem('outlook_client_id') || '';
+let OUTLOOK_ICS_URL  = localStorage.getItem('outlook_ics_url') || '';
 
 let tasks        = JSON.parse(localStorage.getItem('planner_tasks') || '[]');
 let gcalEvents   = JSON.parse(localStorage.getItem('gcal_events')   || '[]');
@@ -414,17 +415,19 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('api-url-input').value = API_URL;
   document.getElementById('gcal-client-id').value = GCAL_CLIENT_ID;
   document.getElementById('gcal-calendar-id').value = GCAL_CAL_ID !== 'primary' ? GCAL_CAL_ID : '';
-  document.getElementById('outlook-client-id').value = OUTLOOK_CLIENT_ID;
+  document.getElementById('outlook-client-id') && (document.getElementById('outlook-client-id').value = OUTLOOK_CLIENT_ID);
+  document.getElementById('outlook-ics-url') && (document.getElementById('outlook-ics-url').value = OUTLOOK_ICS_URL);
 
   updateAuthUI();
   updateSourcePills();
 
-  if (!API_URL && !GCAL_CLIENT_ID && !OUTLOOK_CLIENT_ID) {
+  if (OUTLOOK_ICS_URL) document.getElementById('outlook-ics-url') && (document.getElementById('outlook-ics-url').value = OUTLOOK_ICS_URL);
+  if (!API_URL && !GCAL_CLIENT_ID && !OUTLOOK_ICS_URL) {
     showConfig();
   } else {
     if (API_URL) syncTasks();
     if (gcalToken && GCAL_CLIENT_ID) fetchGCalEvents();
-    if (outlookToken && OUTLOOK_CLIENT_ID) fetchOutlookEvents();
+    if (OUTLOOK_ICS_URL) fetchOutlookICS();
     renderToday();
     buildMainCalendar();
   }
@@ -571,71 +574,107 @@ function gcalColorHex(id){
 }
 
 // ════════════════════════════════════════════════════════════════
-//  OUTLOOK CALENDAR  (MSAL)
+//  OUTLOOK CALENDAR — ICS feed (no Azure needed)
 // ════════════════════════════════════════════════════════════════
-function initMsal(){
-  if (!OUTLOOK_CLIENT_ID) return;
-  msalApp = new msal.PublicClientApplication({
-    auth: {
-      clientId: OUTLOOK_CLIENT_ID,
-      authority: 'https://login.microsoftonline.com/common',
-      redirectUri: window.location.href.split('?')[0],
-    },
-    cache: { cacheLocation: 'localStorage' }
-  });
+
+async function connectOutlookICS(){
+  OUTLOOK_ICS_URL = document.getElementById('outlook-ics-url').value.trim();
+  if (!OUTLOOK_ICS_URL){ alert('Paste your Outlook ICS URL first'); return; }
+  localStorage.setItem('outlook_ics_url', OUTLOOK_ICS_URL);
+  await fetchOutlookICS();
 }
 
-async function connectOutlook(){
-  if (!OUTLOOK_CLIENT_ID){ alert('Enter your Azure App Client ID first'); return; }
-  if (!msalApp) initMsal();
-  try {
-    const resp = await msalApp.loginPopup({
-      scopes: ['Calendars.Read','User.Read'],
-      prompt: 'select_account'
-    });
-    outlookToken = resp.accessToken;
-    localStorage.setItem('outlook_token', outlookToken);
-    updateAuthUI(); updateSourcePills();
-    fetchOutlookEvents();
-  } catch(e){ alert('Outlook auth failed: '+e.message); }
-}
+async function fetchOutlookEvents(){ await fetchOutlookICS(); }
 
-async function fetchOutlookEvents(){
-  if (!OUTLOOK_CLIENT_ID) return;
-  if (!msalApp) initMsal();
+async function fetchOutlookICS(){
+  if (!OUTLOOK_ICS_URL) return;
   setSyncStatus('syncing','Fetching Outlook...');
   try {
-    // Silent token refresh
-    const accounts = msalApp.getAllAccounts();
-    if (!accounts.length){ setSyncStatus('error','Outlook: sign in again'); return; }
-    const resp = await msalApp.acquireTokenSilent({
-      scopes: ['Calendars.Read'], account: accounts[0]
-    });
-    outlookToken = resp.accessToken;
-    localStorage.setItem('outlook_token', outlookToken);
-
-    const now = new Date();
-    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-    const end   = new Date(now.getFullYear(), now.getMonth()+2, 0).toISOString();
-    const url = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${start}&endDateTime=${end}&$top=200&$select=subject,start,end,bodyPreview,location,isAllDay`;
-    const r = await fetch(url, {headers:{Authorization:'Bearer '+outlookToken, Prefer:'outlook.timezone="UTC"'}});
+    // Use a CORS proxy to fetch the ICS file
+    const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(OUTLOOK_ICS_URL);
+    const r = await fetch(proxyUrl);
     const data = await r.json();
-    outlookEvents = (data.value||[]).map(e=>({
-      id: 'outlook_'+e.id,
-      source: 'outlook',
-      title: e.subject || '(no title)',
-      start: e.start.dateTime ? e.start.dateTime+'Z' : e.start.dateTime,
-      end:   e.end.dateTime   ? e.end.dateTime+'Z'   : e.end.dateTime,
-      color: '#0078d4',
-      allDay: e.isAllDay,
-      description: e.bodyPreview||'',
-      location: e.location?.displayName||'',
-    }));
+    if (!data.contents) throw new Error('Empty response');
+    const events = parseICS(data.contents);
+    outlookEvents = events;
     localStorage.setItem('outlook_events', JSON.stringify(outlookEvents));
+    outlookToken = 'ics'; // mark as connected
+    localStorage.setItem('outlook_token', 'ics');
+    updateAuthUI(); updateSourcePills();
     setSyncStatus('ok','Synced');
     renderToday(); renderAll(); buildMainCalendar();
-  } catch(e){ setSyncStatus('error','Outlook error'); console.error(e); }
+  } catch(e){
+    setSyncStatus('error','Outlook ICS error');
+    console.error('ICS fetch error:', e);
+    alert('Could not load Outlook calendar. Check your ICS URL is correct.');
+  }
 }
+
+function parseICS(icsText){
+  const events = [];
+  const unfolded = icsText.split('
+ ').join('').split('
+').join('
+').split('').join('
+');
+  const lines = unfolded.split('
+');
+  let evt = null;
+  for (let i = 0; i < lines.length; i++){
+    const line = lines[i].trim();
+    if (line === 'BEGIN:VEVENT'){ evt = {}; continue; }
+    if (line === 'END:VEVENT'){
+      if (evt && evt.title){
+        events.push({
+          id: 'outlook_' + (evt.uid || String(Math.random())),
+          source: 'outlook',
+          title: evt.title,
+          start: evt.start,
+          end:   evt.end || evt.start,
+          color: '#0078d4',
+          allDay: evt.allDay || false,
+          description: evt.description || '',
+          location: evt.location || '',
+        });
+      }
+      evt = null; continue;
+    }
+    if (!evt) continue;
+    const colon = line.indexOf(':');
+    if (colon < 0) continue;
+    const key = line.slice(0, colon).toUpperCase();
+    const val = line.slice(colon + 1);
+    const cleanVal = val.split('\n').join(' ').split('\,').join(',').split('\;').join(';');
+    if (key === 'SUMMARY')     evt.title       = cleanVal;
+    if (key === 'UID')         evt.uid         = val;
+    if (key === 'LOCATION')    evt.location    = cleanVal;
+    if (key === 'DESCRIPTION') evt.description = cleanVal;
+    if (key === 'DTSTART;VALUE=DATE'){ evt.start = icsDateToISO(val); evt.allDay = true; }
+    else if (key === 'DTSTART' || key.startsWith('DTSTART;')) evt.start = icsDateTimeToISO(val);
+    if (key === 'DTEND;VALUE=DATE') evt.end = icsDateToISO(val);
+    else if (key === 'DTEND' || key.startsWith('DTEND;')) evt.end = icsDateTimeToISO(val);
+  }
+  return events;
+}
+
+function icsDateToISO(s){
+  // 20260713 → 2026-07-13
+  s = s.trim();
+  return s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8);
+}
+function icsDateTimeToISO(s){
+  // 20260713T190000Z → 2026-07-13T19:00:00Z
+  s = s.trim();
+  if (s.length < 8) return s;
+  const d = s.slice(0,4)+'-'+s.slice(4,6)+'-'+s.slice(6,8);
+  if (s.length < 15) return d;
+  const t = s.slice(9,11)+':'+s.slice(11,13)+':'+s.slice(13,15);
+  const z = s.endsWith('Z') ? 'Z' : '';
+  return d+'T'+t+z;
+}
+
+function initMsal(){} // no-op, kept for compatibility
+function connectOutlook(){ connectOutlookICS(); }
 
 // ════════════════════════════════════════════════════════════════
 //  COMBINED EVENTS HELPERS
@@ -940,12 +979,13 @@ function saveConfig(){
   API_URL            = document.getElementById('api-url-input').value.trim();
   GCAL_CLIENT_ID     = document.getElementById('gcal-client-id').value.trim();
   GCAL_CAL_ID        = document.getElementById('gcal-calendar-id').value.trim() || 'primary';
-  OUTLOOK_CLIENT_ID  = document.getElementById('outlook-client-id').value.trim();
+  OUTLOOK_CLIENT_ID  = (document.getElementById('outlook-client-id') || {value:''}).value.trim();
+  OUTLOOK_ICS_URL    = (document.getElementById('outlook-ics-url') || {value:''}).value.trim();
   localStorage.setItem('planner_api_url',   API_URL);
   localStorage.setItem('gcal_client_id',    GCAL_CLIENT_ID);
   localStorage.setItem('gcal_cal_id',       GCAL_CAL_ID);
   localStorage.setItem('outlook_client_id', OUTLOOK_CLIENT_ID);
-  if (OUTLOOK_CLIENT_ID) initMsal();
+  localStorage.setItem('outlook_ics_url',   OUTLOOK_ICS_URL);
   document.getElementById('config-msg').textContent='✓ Saved';
   setTimeout(()=>{ hideConfig(); syncAll(); },800);
 }
@@ -958,8 +998,8 @@ function updateAuthUI(){
   const outBtn=document.getElementById('outlook-auth-btn');
   const outLbl=document.getElementById('outlook-auth-label');
   const outSt =document.getElementById('outlook-auth-status');
-  if (outlookToken){ outBtn.classList.add('connected'); outLbl.textContent='Outlook Calendar connected'; outSt.textContent='✓'; }
-  else { outBtn.classList.remove('connected'); outLbl.textContent='Connect Outlook Calendar'; outSt.textContent=''; }
+  if (outlookToken){ outBtn.classList.add('connected'); outLbl.textContent='Outlook Calendar connected ✓'; outSt.textContent='✓'; }
+  else { outBtn.classList.remove('connected'); outLbl.textContent='Load Outlook Calendar'; outSt.textContent=''; }
 }
 function exportData(){
   const blob=new Blob([JSON.stringify(tasks,null,2)],{type:'application/json'});
