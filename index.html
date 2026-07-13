@@ -214,6 +214,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
     <button class="tab active" onclick="switchTab('today',this)">Today</button>
     <button class="tab" onclick="switchTab('all',this)">Tasks</button>
     <button class="tab" onclick="switchTab('calendar',this)">Calendar</button>
+    <button class="tab" onclick="switchTab('messages',this)" id="tab-btn-messages">💬<span id="msg-badge" style="display:none;background:var(--red);color:#fff;border-radius:20px;font-size:10px;padding:1px 5px;margin-left:3px"></span></button>
   </div>
 
   <!-- ── TODAY TAB ── -->
@@ -261,6 +262,41 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
     </div>
   </div>
 
+  <!-- ── MESSAGES TAB ── -->
+  <div id="tab-messages" class="tab-content" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+
+    <!-- Launch buttons -->
+    <div style="display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border)">
+      <button onclick="openLink('https://chat.google.com')" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;font-size:12px;font-weight:500;color:var(--text)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" fill="#1a73e8"/><circle cx="7" cy="11" r="1.5" fill="#fff"/><circle cx="12" cy="11" r="1.5" fill="#fff"/><circle cx="17" cy="11" r="1.5" fill="#fff"/></svg>
+        Open Google Chat
+      </button>
+      <button onclick="openLink('https://slack.com')" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;font-size:12px;font-weight:500;color:var(--text)">
+        <svg width="16" height="16" viewBox="0 0 24 24"><path d="M6 15a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 0v3a2 2 0 1 1-4 0v-3h4zm3-9a2 2 0 1 1 4 0 2 2 0 0 1-4 0zm0 0H6a2 2 0 1 1 0-4h3v4zm9 3a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm0 0h-3v-4h3a2 2 0 1 1 0 4zm-3 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm0 0v-3h4v3a2 2 0 1 1-4 0z" fill="#4A154B"/></svg>
+        Open Slack
+      </button>
+    </div>
+
+    <!-- Slack feed -->
+    <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Slack Messages</div>
+      <button onclick="refreshSlack()" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;color:var(--text2)">Refresh</button>
+    </div>
+    <div class="tasks-wrap" id="slack-feed">
+      <div class="empty" id="slack-empty">
+        <div class="empty-icon">💬</div>
+        <div class="empty-txt" id="slack-empty-txt">Connect Slack in ⚙️ settings</div>
+      </div>
+    </div>
+
+    <!-- Google Chat note -->
+    <div style="padding:10px 12px;border-top:1px solid var(--border);background:var(--surface2)">
+      <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">Google Chat</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.5">Google Chat API requires Workspace admin access. Use the button above to open it directly.</div>
+    </div>
+
+  </div>
+
   <!-- ── CONFIG SCREEN ── -->
   <div id="config-screen" style="display:none;flex-direction:column;flex:1;overflow:hidden">
     <div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
@@ -304,6 +340,25 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
         <div class="config-section-title">📆 Outlook Calendar</div>
         <div style="font-size:12px;color:var(--text3);line-height:1.6;padding:8px 10px;background:var(--surface2);border-radius:var(--r)">
           Share your Outlook calendar to <strong style="color:var(--text2)">supreti@lbl.gov</strong> in Outlook settings, then accept the invite in Gmail. It will appear automatically here through your Google Calendar connection.
+        </div>
+      </div>
+
+      <!-- Slack -->
+      <div class="config-section">
+        <div class="config-section-title">💬 Slack</div>
+        <div class="config-field">
+          <label>Slack User OAuth Token</label>
+          <input type="text" id="slack-token" placeholder="xoxp-xxxxxxxxxxxx-xxxxxxxxxxxx">
+          <small>slack.com/apps → Build → Create App → OAuth & Permissions → add channels:history, channels:read scopes → install → copy User Token</small>
+        </div>
+        <div class="config-field">
+          <label>Channels to watch (comma separated)</label>
+          <input type="text" id="slack-channels" placeholder="general,random,project-x">
+          <small>Exact channel names without # symbol</small>
+        </div>
+        <div class="config-field">
+          <label>Slack Workspace URL</label>
+          <input type="text" id="slack-workspace" placeholder="yourworkspace.slack.com">
         </div>
       </div>
 
@@ -407,6 +462,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('gcal-client-id').value = GCAL_CLIENT_ID;
   document.getElementById('gcal-calendar-id').value = GCAL_CAL_ID !== 'primary' ? GCAL_CAL_ID : '';
   document.getElementById('outlook-client-id') && (document.getElementById('outlook-client-id').value = OUTLOOK_CLIENT_ID);
+  document.getElementById('slack-token')     && (document.getElementById('slack-token').value     = SLACK_TOKEN);
+  document.getElementById('slack-channels')  && (document.getElementById('slack-channels').value  = SLACK_CHANNELS);
+  document.getElementById('slack-workspace') && (document.getElementById('slack-workspace').value  = SLACK_WORKSPACE);
   document.getElementById('outlook-ics-url') && (document.getElementById('outlook-ics-url').value = OUTLOOK_ICS_URL);
 
   updateAuthUI();
@@ -423,6 +481,7 @@ document.addEventListener('DOMContentLoaded', () => {
     buildMainCalendar();
   }
   setInterval(syncAll, 60000);
+setInterval(()=>{ if(SLACK_TOKEN) refreshSlack(); }, 60000);
 });
 
 // ════════════════════════════════════════════════════════════════
@@ -1019,6 +1078,12 @@ function saveConfig(){
   localStorage.setItem('gcal_cal_id',       GCAL_CAL_ID);
   localStorage.setItem('outlook_client_id', OUTLOOK_CLIENT_ID);
   localStorage.setItem('outlook_ics_url',   OUTLOOK_ICS_URL);
+  SLACK_TOKEN     = (document.getElementById('slack-token')||{value:''}).value.trim();
+  SLACK_CHANNELS  = (document.getElementById('slack-channels')||{value:''}).value.trim();
+  SLACK_WORKSPACE = (document.getElementById('slack-workspace')||{value:''}).value.trim();
+  localStorage.setItem('slack_token',     SLACK_TOKEN);
+  localStorage.setItem('slack_channels',  SLACK_CHANNELS);
+  localStorage.setItem('slack_workspace', SLACK_WORKSPACE);
   document.getElementById('config-msg').textContent='✓ Saved';
   setTimeout(()=>{ hideConfig(); syncAll(); },800);
 }
@@ -1044,6 +1109,103 @@ function clearLocalData(){
 }
 
 // ════════════════════════════════════════════════════════════════
+//  SLACK
+// ════════════════════════════════════════════════════════════════
+let SLACK_TOKEN     = localStorage.getItem('slack_token') || '';
+let SLACK_CHANNELS  = localStorage.getItem('slack_channels') || '';
+let SLACK_WORKSPACE = localStorage.getItem('slack_workspace') || 'slack.com';
+let slackData       = [];
+
+function openLink(url){ window.open(url, '_blank'); }
+
+async function refreshSlack(){
+  if (!SLACK_TOKEN){ 
+    document.getElementById('slack-empty-txt').textContent = 'Connect Slack in ⚙️ settings';
+    return; 
+  }
+  document.getElementById('slack-empty').style.display = 'none';
+  document.getElementById('slack-feed').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px">Loading...</div>';
+
+  try {
+    const channelNames = SLACK_CHANNELS.split(',').map(c=>c.trim()).filter(Boolean);
+    
+    // Get channel list
+    const listR = await fetch('https://slack.com/api/conversations.list?types=public_channel,private_channel&limit=200', {
+      headers:{ Authorization: 'Bearer ' + SLACK_TOKEN }
+    });
+    const listData = await listR.json();
+    if (!listData.ok) throw new Error(listData.error || 'Auth failed');
+    
+    const allChannels = listData.channels || [];
+    // Filter to requested channels, or show all joined ones
+    const channels = channelNames.length
+      ? allChannels.filter(c => channelNames.includes(c.name) && c.is_member)
+      : allChannels.filter(c => c.is_member).slice(0, 8);
+
+    // Fetch latest messages per channel
+    const feedItems = [];
+    for (const ch of channels){
+      const histR = await fetch(`https://slack.com/api/conversations.history?channel=${ch.id}&limit=3`, {
+        headers:{ Authorization: 'Bearer ' + SLACK_TOKEN }
+      });
+      const histData = await histR.json();
+      if (!histData.ok) continue;
+      const msgs = histData.messages || [];
+      msgs.forEach(m => {
+        feedItems.push({
+          channel: ch.name,
+          channelId: ch.id,
+          text: m.text || '',
+          ts: m.ts,
+          unread: ch.unread_count || 0,
+        });
+      });
+    }
+
+    // Sort by timestamp descending
+    feedItems.sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
+    slackData = feedItems;
+
+    // Update badge
+    const totalUnread = channels.reduce((s,c) => s + (c.unread_count||0), 0);
+    const badge = document.getElementById('msg-badge');
+    if (totalUnread > 0){ badge.style.display=''; badge.textContent=totalUnread; }
+    else badge.style.display='none';
+
+    renderSlackFeed();
+  } catch(e){
+    document.getElementById('slack-feed').innerHTML = 
+      `<div style="padding:16px;color:var(--red);font-size:12px;text-align:center">
+        Error: ${e.message}<br><span style="color:var(--text3);font-size:11px">Check your token and try again</span>
+      </div>`;
+  }
+}
+
+function renderSlackFeed(){
+  const el = document.getElementById('slack-feed');
+  if (!slackData.length){
+    el.innerHTML = '<div class="empty"><div class="empty-icon">💬</div><div class="empty-txt">No messages found</div></div>';
+    return;
+  }
+  const ws = SLACK_WORKSPACE || 'slack.com';
+  el.innerHTML = slackData.map(m => {
+    const time = new Date(parseFloat(m.ts)*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    const date = new Date(parseFloat(m.ts)*1000).toLocaleDateString([],{month:'short',day:'numeric'});
+    const text = m.text.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').trim();
+    const short = text.length > 80 ? text.slice(0,80)+'…' : text;
+    const chUrl = `https://${ws}/channels/${m.channelId}`;
+    return `<div onclick="openLink('${chUrl}')" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
+        <span style="font-size:11px;font-weight:700;color:var(--purple)">#${m.channel}</span>
+        <span style="font-size:10px;color:var(--text3)">${date} ${time}</span>
+      </div>
+      <div style="font-size:12px;color:var(--text);line-height:1.4">${esc(short) || '<em style="color:var(--text3)">attachment or media</em>'}</div>
+      ${m.unread ? `<div style="font-size:10px;color:var(--accent);margin-top:2px">${m.unread} unread</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// ════════════════════════════════════════════════════════════════
 //  TAB SWITCHING
 // ════════════════════════════════════════════════════════════════
 function switchTab(name,btn){
@@ -1054,6 +1216,7 @@ function switchTab(name,btn){
   btn.classList.add('active');
   if (name==='all') renderAll();
   if (name==='calendar') buildMainCalendar();
+  if (name==='messages') refreshSlack();
 }
 </script>
 </body>
