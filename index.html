@@ -482,7 +482,7 @@ const CATS = {Work:'#4a86e8',Personal:'#2d9e6b',Health:'#d94f4f',Study:'#7c3aed'
 // ════════════════════════════════════════════════════════════════
 //  INIT
 // ════════════════════════════════════════════════════════════════
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('hdr-date').textContent =
     new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
   document.getElementById('task-date-quick').value = todayStr();
@@ -505,7 +505,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!API_URL && !GCAL_CLIENT_ID && !OUTLOOK_ICS_URL) {
     showConfig();
   } else {
-    if (API_URL) syncTasks();
+    if (API_URL) { await pullSettingsFromSheet(); syncTasks(); }
     if (gcalToken && GCAL_CLIENT_ID) fetchGCalEvents();
     if (OUTLOOK_ICS_URL) fetchOutlookICS();
     renderToday();
@@ -513,6 +513,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   setInterval(syncAll, 60000);
 setInterval(()=>{ if(SLACK_TOKEN) refreshSlack(); }, 60000);
+setInterval(pullSettingsFromSheet, 5 * 60 * 1000);
 });
 
 // ════════════════════════════════════════════════════════════════
@@ -567,6 +568,65 @@ async function apiPost(body){
 }
 
 function saveTasks(){ localStorage.setItem('planner_tasks',JSON.stringify(tasks)); }
+
+// ════════════════════════════════════════════════════════════════
+//  SETTINGS SYNC — pull from Google Sheet on every load
+// ════════════════════════════════════════════════════════════════
+async function pullSettingsFromSheet(){
+  if (!API_URL) return;
+  try {
+    const r = await fetch(API_URL + '?action=getSettings');
+    const data = await r.json();
+    if (!data || data.error) return;
+
+    // Apply each remote setting to localStorage
+    const keys = ['gcal_client_id','gcal_cal_id','outlook_ics_url',
+                  'slack_token','slack_channels','slack_workspace'];
+    let changed = false;
+    for (const k of keys){
+      if (data[k] !== undefined && data[k] !== '' && data[k] !== localStorage.getItem(k)){
+        localStorage.setItem(k, data[k]);
+        changed = true;
+      }
+    }
+    if (changed){
+      // Reload vars from localStorage
+      GCAL_CLIENT_ID    = localStorage.getItem('gcal_client_id')    || '';
+      GCAL_CAL_ID       = localStorage.getItem('gcal_cal_id')       || 'primary';
+      OUTLOOK_ICS_URL   = localStorage.getItem('outlook_ics_url')   || '';
+      SLACK_TOKEN       = localStorage.getItem('slack_token')       || '';
+      SLACK_CHANNELS    = localStorage.getItem('slack_channels')    || '';
+      SLACK_WORKSPACE   = localStorage.getItem('slack_workspace')   || 'slack.com';
+      // Update settings form
+      document.getElementById('gcal-client-id')  && (document.getElementById('gcal-client-id').value  = GCAL_CLIENT_ID);
+      document.getElementById('outlook-ics-url') && (document.getElementById('outlook-ics-url').value = OUTLOOK_ICS_URL);
+      document.getElementById('slack-token')     && (document.getElementById('slack-token').value     = SLACK_TOKEN);
+      document.getElementById('slack-channels')  && (document.getElementById('slack-channels').value  = SLACK_CHANNELS);
+      document.getElementById('slack-workspace') && (document.getElementById('slack-workspace').value = SLACK_WORKSPACE);
+    }
+  } catch(e){ /* silent */ }
+}
+
+async function pushSettingsToSheet(){
+  if (!API_URL) return;
+  const settings = {
+    gcal_client_id:  GCAL_CLIENT_ID  || '',
+    gcal_cal_id:     GCAL_CAL_ID     || '',
+    outlook_ics_url: OUTLOOK_ICS_URL || '',
+    slack_token:     SLACK_TOKEN     || '',
+    slack_channels:  SLACK_CHANNELS  || '',
+    slack_workspace: SLACK_WORKSPACE || '',
+  };
+  try {
+    await fetch(API_URL, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({action:'setSettings', data:settings}),
+      mode: 'no-cors',
+    });
+  } catch(e){ /* silent */ }
+}
+
 
 function addTask(task){
   const id = 'local_'+Date.now();
@@ -1115,6 +1175,7 @@ function saveConfig(){
   localStorage.setItem('slack_token',     SLACK_TOKEN);
   localStorage.setItem('slack_channels',  SLACK_CHANNELS);
   localStorage.setItem('slack_workspace', SLACK_WORKSPACE);
+  pushSettingsToSheet(); // sync to other devices
   document.getElementById('config-msg').textContent='✓ Saved';
   setTimeout(()=>{ hideConfig(); syncAll(); },800);
 }
