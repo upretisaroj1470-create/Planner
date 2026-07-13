@@ -1303,10 +1303,11 @@ async function refreshSlack(){
 
     // Get channel list via proxy
     // Fetch channels and DMs separately for reliability
+    // include_latest=true gives us last_message_ts for sorting by activity
     const [chanData, imData, mpimData] = await Promise.all([
-      slackFetch('conversations.list?types=public_channel,private_channel&limit=100&exclude_archived=true'),
-      slackFetch('conversations.list?types=im&limit=30'),
-      slackFetch('conversations.list?types=mpim&limit=20'),
+      slackFetch('conversations.list?types=public_channel,private_channel&limit=200&exclude_archived=true&include_latest=true'),
+      slackFetch('conversations.list?types=im&limit=100&include_latest=true'),
+      slackFetch('conversations.list?types=mpim&limit=50&include_latest=true'),
     ]);
 
     if (!chanData.ok) throw new Error(chanData.error || 'Auth failed — check your token');
@@ -1334,17 +1335,26 @@ async function refreshSlack(){
       c.name = c.name ? c.name.split('--').join(' · ') : 'Group DM';
     });
 
-    // Filter: if channel names specified use those, otherwise show
-    // joined channels + ALL DMs that have messages (priority on DMs)
+    // Sort ALL channels by most recent activity first
+    allChannels.sort((a, b) => {
+      const at = parseFloat(a.last_message_ts || a.latest_ts || 0);
+      const bt = parseFloat(b.last_message_ts || b.latest_ts || 0);
+      return bt - at;
+    });
+
     let channels;
     if (channelNames.length){
       channels = allChannels.filter(c =>
         channelNames.includes(c.name) || channelNames.includes('#'+c.name)
       );
     } else {
-      const regularChans = allChannels.filter(c => !c.is_im && !c.is_mpim && c.is_member).slice(0, 6);
-      const dms          = allChannels.filter(c => c.is_im || c.is_mpim).slice(0, 10);
-      channels = [...dms, ...regularChans];
+      // Show most recently active channels and DMs, no old ones
+      const cutoff = (Date.now() / 1000) - (30 * 24 * 60 * 60); // last 30 days
+      const active = allChannels.filter(c => {
+        const ts = parseFloat(c.last_message_ts || c.latest_ts || 0);
+        return ts > cutoff && (c.is_member !== false);
+      });
+      channels = active.slice(0, 15); // top 15 most recently active
     }
 
     if (!channels.length){
@@ -1501,10 +1511,11 @@ async function refreshSlack(){
 
     // Get channel list via proxy
     // Fetch channels and DMs separately for reliability
+    // include_latest=true gives us last_message_ts for sorting by activity
     const [chanData, imData, mpimData] = await Promise.all([
-      slackFetch('conversations.list?types=public_channel,private_channel&limit=100&exclude_archived=true'),
-      slackFetch('conversations.list?types=im&limit=30'),
-      slackFetch('conversations.list?types=mpim&limit=20'),
+      slackFetch('conversations.list?types=public_channel,private_channel&limit=200&exclude_archived=true&include_latest=true'),
+      slackFetch('conversations.list?types=im&limit=100&include_latest=true'),
+      slackFetch('conversations.list?types=mpim&limit=50&include_latest=true'),
     ]);
 
     if (!chanData.ok) throw new Error(chanData.error || 'Auth failed — check your token');
@@ -1532,17 +1543,26 @@ async function refreshSlack(){
       c.name = c.name ? c.name.split('--').join(' · ') : 'Group DM';
     });
 
-    // Filter: if channel names specified use those, otherwise show
-    // joined channels + ALL DMs that have messages (priority on DMs)
+    // Sort ALL channels by most recent activity first
+    allChannels.sort((a, b) => {
+      const at = parseFloat(a.last_message_ts || a.latest_ts || 0);
+      const bt = parseFloat(b.last_message_ts || b.latest_ts || 0);
+      return bt - at;
+    });
+
     let channels;
     if (channelNames.length){
       channels = allChannels.filter(c =>
         channelNames.includes(c.name) || channelNames.includes('#'+c.name)
       );
     } else {
-      const regularChans = allChannels.filter(c => !c.is_im && !c.is_mpim && c.is_member).slice(0, 6);
-      const dms          = allChannels.filter(c => c.is_im || c.is_mpim).slice(0, 10);
-      channels = [...dms, ...regularChans];
+      // Show most recently active channels and DMs, no old ones
+      const cutoff = (Date.now() / 1000) - (30 * 24 * 60 * 60); // last 30 days
+      const active = allChannels.filter(c => {
+        const ts = parseFloat(c.last_message_ts || c.latest_ts || 0);
+        return ts > cutoff && (c.is_member !== false);
+      });
+      channels = active.slice(0, 15); // top 15 most recently active
     }
 
     if (!channels.length){
