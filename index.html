@@ -617,14 +617,18 @@ async function pushSettingsToSheet(){
     slack_channels:  SLACK_CHANNELS  || '',
     slack_workspace: SLACK_WORKSPACE || '',
   };
+  console.log('Pushing settings to sheet:', Object.keys(settings).filter(k => settings[k]));
   try {
-    await fetch(API_URL, {
+    // Use text/plain so Apps Script gets the raw body without CORS preflight
+    const r = await fetch(API_URL, {
       method: 'POST',
-      headers: {'Content-Type':'application/json'},
+      headers: {'Content-Type':'text/plain;charset=utf-8'},
       body: JSON.stringify({action:'setSettings', data:settings}),
-      mode: 'no-cors',
     });
-  } catch(e){ /* silent */ }
+    const result = await r.json();
+    console.log('Settings push result:', result);
+    if (result.error) console.error('Settings push failed:', result.error);
+  } catch(e){ console.error('Settings push error:', e); }
 }
 
 
