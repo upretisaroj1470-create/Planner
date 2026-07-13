@@ -612,13 +612,16 @@ async function fetchOutlookICS(){
 
 function parseICS(icsText){
   const events = [];
-  const unfolded = icsText.split('
- ').join('').split('
-').join('
-').split('').join('
-');
-  const lines = unfolded.split('
-');
+  const CR = String.fromCharCode(13);
+  const LF = String.fromCharCode(10);
+  const CRLF = CR + LF;
+  // Unfold: CRLF+SPACE = continuation
+  let text = icsText;
+  text = text.split(CRLF + ' ').join('');
+  text = text.split(CRLF + '\t').join('');
+  text = text.split(CRLF).join(LF);
+  text = text.split(CR).join(LF);
+  const lines = text.split(LF);
   let evt = null;
   for (let i = 0; i < lines.length; i++){
     const line = lines[i].trim();
@@ -644,15 +647,15 @@ function parseICS(icsText){
     if (colon < 0) continue;
     const key = line.slice(0, colon).toUpperCase();
     const val = line.slice(colon + 1);
-    const cleanVal = val.split('\n').join(' ').split('\,').join(',').split('\;').join(';');
-    if (key === 'SUMMARY')     evt.title       = cleanVal;
+    const clean = val.split('\\n').join(' ').split('\\,').join(',').split('\\;').join(';');
+    if (key === 'SUMMARY')     evt.title       = clean;
     if (key === 'UID')         evt.uid         = val;
-    if (key === 'LOCATION')    evt.location    = cleanVal;
-    if (key === 'DESCRIPTION') evt.description = cleanVal;
+    if (key === 'LOCATION')    evt.location    = clean;
+    if (key === 'DESCRIPTION') evt.description = clean;
     if (key === 'DTSTART;VALUE=DATE'){ evt.start = icsDateToISO(val); evt.allDay = true; }
-    else if (key === 'DTSTART' || key.startsWith('DTSTART;')) evt.start = icsDateTimeToISO(val);
+    else if (key === 'DTSTART' || key.indexOf('DTSTART;') === 0) evt.start = icsDateTimeToISO(val);
     if (key === 'DTEND;VALUE=DATE') evt.end = icsDateToISO(val);
-    else if (key === 'DTEND' || key.startsWith('DTEND;')) evt.end = icsDateTimeToISO(val);
+    else if (key === 'DTEND' || key.indexOf('DTEND;') === 0) evt.end = icsDateTimeToISO(val);
   }
   return events;
 }
