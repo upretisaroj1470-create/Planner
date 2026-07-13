@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Planner">
+<meta name="theme-color" content="#1a1a2e">
+<title>Planner</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#f7f7f5;--surface:#ffffff;--surface2:#f0f0ed;
+  --border:#e5e5e0;--border2:#d0d0ca;
+  --text:#1a1a18;--text2:#5a5a56;--text3:#9a9a94;
+  --accent:#4a86e8;--accent-l:#e8f0fe;
+  --green:#2d9e6b;--green-l:#e6f7f0;
+  --red:#d94f4f;--red-l:#fdf0f0;
+  --amber:#d97706;--amber-l:#fef3e2;
+  --purple:#7c3aed;--purple-l:#f3f0ff;
+  --gcal:#1a73e8;--gcal-l:#e8f0fe;
+  --outlook:#0078d4;--outlook-l:#e5f2fd;
+  --sidebar-w:340px;
+  --r:8px;--r2:12px;
+  --font:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+@media(prefers-color-scheme:dark){:root{
+  --bg:#111116;--surface:#1c1c24;--surface2:#252530;
+  --border:#2e2e3a;--border2:#3a3a48;
+  --text:#f0f0ec;--text2:#9090a0;--text3:#606070;
+  --accent:#6ba3ff;--accent-l:#1a2540;
+  --green:#34c48a;--green-l:#0d2b1e;
+  --red:#f07070;--red-l:#2b1010;
+  --amber:#fbbf24;--amber-l:#2b1e08;
+  --purple:#a78bfa;--purple-l:#1e1030;
+  --gcal:#6ba3ff;--gcal-l:#1a2540;
+  --outlook:#4ca3f0;--outlook-l:#0a2040;
+}}
+body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;height:100vh;display:flex;overflow:hidden}
+.sidebar{width:var(--sidebar-w);min-width:var(--sidebar-w);height:100vh;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden}
+.main-view{flex:1;height:100vh;overflow-y:auto;background:var(--bg)}
+.hdr{padding:12px 14px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px}
+.hdr-left{min-width:0}
+.hdr-title{font-size:15px;font-weight:600;color:var(--text)}
+.hdr-date{font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hdr-right{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.icon-btn{width:28px;height:28px;border:none;background:transparent;border-radius:var(--r);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:16px;transition:background .12s}
+.icon-btn:hover{background:var(--surface2)}
+.sync-row{display:flex;align-items:center;gap:4px}
+.sync-dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}
+.sync-dot.syncing{background:var(--amber);animation:pulse 1s infinite}
+.sync-dot.error{background:var(--red)}
+.sync-label{font-size:10px;color:var(--text3)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Calendar source pills */
+.source-pills{display:flex;gap:5px;padding:8px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.source-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:500;padding:3px 9px;border-radius:20px;border:1.5px solid transparent;cursor:pointer;transition:all .12s}
+.source-pill.tasks{background:var(--surface2);border-color:var(--border);color:var(--text2)}
+.source-pill.tasks.on{background:var(--accent-l);border-color:var(--accent);color:var(--accent)}
+.source-pill.gcal{background:var(--gcal-l);border-color:var(--gcal);color:var(--gcal)}
+.source-pill.gcal.off{background:var(--surface2);border-color:var(--border);color:var(--text3);opacity:.6}
+.source-pill.outlook{background:var(--outlook-l);border-color:var(--outlook);color:var(--outlook)}
+.source-pill.outlook.off{background:var(--surface2);border-color:var(--border);color:var(--text3);opacity:.6}
+.source-dot{width:7px;height:7px;border-radius:50%;background:currentColor}
+
+.nav-tabs{display:flex;padding:7px 10px;gap:3px;border-bottom:1px solid var(--border)}
+.tab{flex:1;padding:6px 4px;border:none;background:transparent;border-radius:var(--r);cursor:pointer;font-size:12px;font-weight:500;color:var(--text3);transition:all .12s;text-align:center}
+.tab.active{background:var(--accent-l);color:var(--accent)}
+
+/* Today strip */
+.today-strip{padding:9px 13px;background:var(--accent-l);border-bottom:1px solid var(--border)}
+.today-strip-label{font-size:11px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.today-chips{display:flex;gap:5px;flex-wrap:wrap}
+.chip{font-size:11px;padding:2px 7px;border-radius:20px;background:var(--surface);border:1px solid var(--border);color:var(--text2);display:inline-flex;align-items:center;gap:4px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip.done{text-decoration:line-through;color:var(--text3)}
+.chip-dot{width:5px;height:5px;border-radius:50%;flex-shrink:0}
+
+/* Scrollable task area */
+.tasks-wrap{flex:1;overflow-y:auto;padding:8px 10px}
+
+/* Items */
+.task-item{display:flex;align-items:flex-start;gap:9px;padding:8px 9px;border-radius:var(--r);margin-bottom:3px;border:1px solid transparent;transition:border .12s,background .12s;cursor:pointer}
+.task-item:hover{background:var(--surface2);border-color:var(--border)}
+.task-item.done-item .task-title{text-decoration:line-through;color:var(--text3)}
+.check{width:17px;height:17px;border-radius:50%;border:2px solid var(--border2);flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;transition:all .12s;cursor:pointer;font-size:10px}
+.check.checked{background:var(--green);border-color:var(--green);color:#fff}
+.task-body{flex:1;min-width:0}
+.task-title{font-size:13px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.task-meta{font-size:11px;color:var(--text3);margin-top:2px;display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.cat-dot{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:3px;vertical-align:1px}
+.task-actions{display:flex;gap:3px;opacity:0;transition:opacity .12s;flex-shrink:0}
+.task-item:hover .task-actions{opacity:1}
+.act-btn{width:22px;height:22px;border:none;background:transparent;border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text3)}
+.act-btn:hover{background:var(--border)}
+.act-btn.del:hover{background:var(--red-l);color:var(--red)}
+
+/* Calendar event items */
+.event-item{display:flex;align-items:flex-start;gap:9px;padding:7px 9px;border-radius:var(--r);margin-bottom:3px;border-left:3px solid;background:var(--surface2)}
+.event-title{font-size:13px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.event-meta{font-size:11px;color:var(--text3);margin-top:2px}
+.event-source{font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;display:inline-block}
+.event-source.gcal{background:var(--gcal-l);color:var(--gcal)}
+.event-source.outlook{background:var(--outlook-l);color:var(--outlook)}
+
+/* Section divider */
+.section-label{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;padding:10px 12px 4px;display:flex;align-items:center;gap:6px}
+.section-label::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* Add bar */
+.add-bar{padding:9px 10px;border-top:1px solid var(--border)}
+.add-input-row{display:flex;gap:5px}
+.add-input{flex:1;padding:7px 9px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);color:var(--text);font-size:13px;outline:none;transition:border .15s}
+.add-input:focus{border-color:var(--accent)}
+.add-btn{padding:7px 13px;background:var(--accent);color:#fff;border:none;border-radius:var(--r);font-size:13px;font-weight:500;cursor:pointer;white-space:nowrap}
+.add-btn:hover{opacity:.88}
+.add-options{display:flex;gap:5px;margin-top:5px;flex-wrap:wrap}
+.add-opt{font-size:11px;padding:3px 7px;border:1px solid var(--border);border-radius:20px;background:var(--surface);color:var(--text2);cursor:pointer;transition:all .12s}
+.add-opt:hover,.add-opt.sel{background:var(--accent-l);border-color:var(--accent);color:var(--accent)}
+
+/* Calendar grid */
+.cal-wrap{padding:12px}
+.cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.cal-month{font-size:14px;font-weight:600}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px}
+.cal-dow{text-align:center;font-size:10px;font-weight:600;color:var(--text3);padding:3px 0;text-transform:uppercase}
+.cal-day{aspect-ratio:1;border-radius:var(--r);display:flex;flex-direction:column;align-items:center;padding:3px 2px;cursor:pointer;transition:background .12s;position:relative}
+.cal-day:hover{background:var(--surface2)}
+.cal-day.today .day-num{background:var(--accent);color:#fff;border-radius:50%;width:22px;height:22px;display:flex;align-items:center;justify-content:center}
+.cal-day.selected{background:var(--accent-l)}
+.cal-day.other-month{opacity:.3}
+.day-num{font-size:12px;font-weight:500;line-height:22px}
+.day-dots{display:flex;gap:2px;margin-top:2px;flex-wrap:wrap;justify-content:center}
+.day-dot{width:4px;height:4px;border-radius:50%}
+
+/* Day detail */
+.day-panel{padding:12px}
+.day-panel-title{font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text)}
+.time-block{display:flex;gap:8px;padding:7px 9px;border-radius:var(--r);margin-bottom:3px;background:var(--surface);border:1px solid var(--border)}
+.time-col{font-size:11px;color:var(--text3);min-width:46px;flex-shrink:0;padding-top:1px}
+
+/* Modal */
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;align-items:center;justify-content:center;padding:16px}
+.modal-bg.open{display:flex}
+.modal{background:var(--surface);border-radius:var(--r2);padding:18px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.25)}
+.modal-title{font-size:14px;font-weight:600;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.field{margin-bottom:10px}
+.field label{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.4px;display:block;margin-bottom:3px}
+.field input,.field select,.field textarea{width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);color:var(--text);font-size:13px;outline:none;font-family:var(--font)}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent)}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.modal-btns{display:flex;gap:7px;margin-top:12px;justify-content:flex-end}
+.btn{padding:7px 14px;border-radius:var(--r);border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;font-weight:500;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.danger{background:var(--red-l);border-color:var(--red);color:var(--red)}
+.btn:hover{opacity:.85}
+
+/* Config screen */
+.config-wrap{padding:16px;overflow-y:auto;flex:1}
+.config-section{margin-bottom:18px}
+.config-section-title{font-size:12px;font-weight:700;color:var(--text2);margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+.config-field{margin-bottom:10px}
+.config-field label{font-size:11px;font-weight:600;color:var(--text3);display:block;margin-bottom:4px}
+.config-field input{width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);color:var(--text);font-size:12px;font-family:monospace;outline:none}
+.config-field input:focus{border-color:var(--accent)}
+.config-field small{font-size:11px;color:var(--text3);display:block;margin-top:3px;line-height:1.5}
+.save-btn{width:100%;padding:9px;background:var(--accent);color:#fff;border:none;border-radius:var(--r);font-size:13px;font-weight:500;cursor:pointer;margin-top:4px}
+.auth-btn{display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);cursor:pointer;font-size:13px;font-weight:500;color:var(--text);margin-bottom:6px;transition:background .12s}
+.auth-btn:hover{background:var(--surface2)}
+.auth-btn.connected{border-color:var(--green);color:var(--green);background:var(--green-l)}
+.auth-icon{font-size:18px}
+.auth-status{margin-left:auto;font-size:11px;font-weight:600}
+.empty{text-align:center;padding:20px 14px;color:var(--text3)}
+.empty-icon{font-size:26px;margin-bottom:6px}
+.empty-txt{font-size:12px}
+
+@media(max-width:600px){
+  .sidebar{width:100%;min-width:100%;border-right:none}
+  .main-view{display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══ SIDEBAR ══════════════════════════════════════════════════════════ -->
+<div class="sidebar">
+
+  <!-- Header -->
+  <div class="hdr">
+    <div class="hdr-left">
+      <div class="hdr-title">Planner</div>
+      <div class="hdr-date" id="hdr-date"></div>
+    </div>
+    <div class="hdr-right">
+      <div class="sync-row"><div class="sync-dot" id="sync-dot"></div><span class="sync-label" id="sync-label">Loading</span></div>
+      <button class="icon-btn" onclick="showConfig()" title="Settings">⚙️</button>
+    </div>
+  </div>
+
+  <!-- Calendar source toggles -->
+  <div class="source-pills" id="source-pills">
+    <div class="source-pill tasks on" onclick="toggleSource('tasks',this)">
+      <div class="source-dot"></div> Tasks
+    </div>
+    <div class="source-pill gcal" id="pill-gcal" onclick="toggleSource('gcal',this)" style="display:none">
+      <div class="source-dot"></div> Google Cal
+    </div>
+    <div class="source-pill outlook" id="pill-outlook" onclick="toggleSource('outlook',this)" style="display:none">
+      <div class="source-dot"></div> Outlook
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="nav-tabs">
+    <button class="tab active" onclick="switchTab('today',this)">Today</button>
+    <button class="tab" onclick="switchTab('all',this)">Tasks</button>
+    <button class="tab" onclick="switchTab('calendar',this)">Calendar</button>
+  </div>
+
+  <!-- ── TODAY TAB ── -->
+  <div id="tab-today" class="tab-content" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+    <div class="today-strip">
+      <div class="today-strip-label" id="today-strip-label">Today</div>
+      <div class="today-chips" id="today-chips"><span class="chip">Loading...</span></div>
+    </div>
+    <div class="tasks-wrap" id="today-list"></div>
+    <div class="add-bar">
+      <div class="add-input-row">
+        <input class="add-input" id="quick-add" placeholder="Add a task..." onkeydown="if(event.key==='Enter')quickAdd()">
+        <button class="add-btn" onclick="quickAdd()">Add</button>
+      </div>
+      <div class="add-options">
+        <button class="add-opt" id="opt-date-btn" onclick="toggleOpt('date')">📅 Today</button>
+        <button class="add-opt" id="opt-cat-btn" onclick="cycleCat()">🏷 Work</button>
+        <button class="add-opt" id="opt-time-btn" onclick="toggleOpt('time')">🕐 Time</button>
+        <button class="add-opt" onclick="openModal()">⋯ More</button>
+      </div>
+      <div id="opt-date-input" style="display:none;margin-top:5px"><input type="date" class="add-input" id="task-date-quick" style="width:100%"></div>
+      <div id="opt-time-input" style="display:none;margin-top:5px"><input type="time" class="add-input" id="task-time-quick" style="width:100%"></div>
+    </div>
+  </div>
+
+  <!-- ── ALL TASKS TAB ── -->
+  <div id="tab-all" class="tab-content" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+    <div style="padding:8px 10px;border-bottom:1px solid var(--border);display:flex;gap:5px">
+      <select id="filter-cat" onchange="renderAll()" style="font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);color:var(--text);flex:1">
+        <option value="">All categories</option>
+        <option>Work</option><option>Personal</option><option>Health</option><option>Study</option><option>Other</option>
+      </select>
+      <select id="filter-done" onchange="renderAll()" style="font-size:12px;padding:5px 7px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);color:var(--text);flex:1">
+        <option value="">All</option><option value="pending">Pending</option><option value="done">Done</option>
+      </select>
+    </div>
+    <div class="tasks-wrap" id="all-list"></div>
+  </div>
+
+  <!-- ── CALENDAR TAB ── -->
+  <div id="tab-calendar" class="tab-content" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+    <div class="tasks-wrap" style="padding:0">
+      <div id="cal-wrap"></div>
+      <div id="day-detail"></div>
+    </div>
+  </div>
+
+  <!-- ── CONFIG SCREEN ── -->
+  <div id="config-screen" style="display:none;flex-direction:column;flex:1;overflow:hidden">
+    <div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+      <span style="font-size:14px;font-weight:600">Settings</span>
+      <button class="icon-btn" onclick="hideConfig()">✕</button>
+    </div>
+    <div class="config-wrap">
+
+      <!-- Tasks / Sheets -->
+      <div class="config-section">
+        <div class="config-section-title">📋 Tasks (Google Sheets)</div>
+        <div class="config-field">
+          <label>Apps Script URL</label>
+          <input type="text" id="api-url-input" placeholder="https://script.google.com/macros/s/.../exec">
+          <small>Paste your deployed Web App URL from Google Apps Script</small>
+        </div>
+      </div>
+
+      <!-- Google Calendar -->
+      <div class="config-section">
+        <div class="config-section-title">📅 Google Calendar</div>
+        <button class="auth-btn" id="gcal-auth-btn" onclick="connectGCal()">
+          <span class="auth-icon">🗓</span>
+          <span id="gcal-auth-label">Connect Google Calendar</span>
+          <span class="auth-status" id="gcal-auth-status"></span>
+        </button>
+        <div class="config-field" id="gcal-id-field" style="display:none">
+          <label>Calendar ID (optional — leave blank for primary)</label>
+          <input type="text" id="gcal-calendar-id" placeholder="primary or user@gmail.com">
+          <small>Find it: Google Calendar → Settings → your calendar → Calendar ID</small>
+        </div>
+        <div class="config-field">
+          <label>Google Client ID</label>
+          <input type="text" id="gcal-client-id" placeholder="xxxxxxxx.apps.googleusercontent.com">
+          <small>Get it free: console.cloud.google.com → APIs → Google Calendar API → Credentials</small>
+        </div>
+      </div>
+
+      <!-- Outlook Calendar -->
+      <div class="config-section">
+        <div class="config-section-title">📆 Outlook Calendar</div>
+        <button class="auth-btn" id="outlook-auth-btn" onclick="connectOutlook()">
+          <span class="auth-icon">📆</span>
+          <span id="outlook-auth-label">Connect Outlook Calendar</span>
+          <span class="auth-status" id="outlook-auth-status"></span>
+        </button>
+        <div class="config-field">
+          <label>Azure App (Client) ID</label>
+          <input type="text" id="outlook-client-id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+          <small>Get it free: portal.azure.com → App registrations → New → add Calendar.Read permission</small>
+        </div>
+      </div>
+
+      <button class="save-btn" onclick="saveConfig()">Save &amp; Apply</button>
+      <div id="config-msg" style="margin-top:8px;font-size:12px;text-align:center;color:var(--green)"></div>
+
+      <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:14px">
+        <div class="config-section-title" style="font-size:11px;color:var(--text3)">Data</div>
+        <button class="btn" style="width:100%;margin-bottom:5px" onclick="exportData()">Export tasks as JSON</button>
+        <button class="btn danger" style="width:100%" onclick="clearLocalData()">Clear local data</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end sidebar -->
+
+<!-- ═══ MAIN VIEW ════════════════════════════════════════════════════════ -->
+<div class="main-view" id="main-view">
+  <div style="padding:20px;max-width:700px;margin:0 auto">
+    <div id="main-calendar"></div>
+    <div id="main-day-tasks" style="margin-top:16px"></div>
+  </div>
+</div>
+
+<!-- ═══ ADD / EDIT MODAL ════════════════════════════════════════════════ -->
+<div class="modal-bg" id="modal-bg" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-title">
+      <span id="modal-title-text">Add task</span>
+      <button class="icon-btn" onclick="closeModal()">✕</button>
+    </div>
+    <div class="field"><label>Title</label><input id="m-title" placeholder="What needs to be done?"></div>
+    <div class="field-row">
+      <div class="field"><label>Date</label><input type="date" id="m-date"></div>
+      <div class="field"><label>Time</label><input type="time" id="m-time"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Category</label>
+        <select id="m-cat">
+          <option>Work</option><option>Personal</option><option>Health</option><option>Study</option><option>Other</option>
+        </select>
+      </div>
+      <div class="field"><label>Repeat</label>
+        <select id="m-repeat">
+          <option value="">None</option><option value="daily">Daily</option>
+          <option value="weekly">Weekly</option><option value="monthly">Monthly</option>
+        </select>
+      </div>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="m-notes" rows="2" placeholder="Optional notes..."></textarea></div>
+    <div class="modal-btns">
+      <button class="btn danger" id="m-delete-btn" style="display:none;margin-right:auto" onclick="deleteCurrentTask()">Delete</button>
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" onclick="saveTask()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Google Identity Services -->
+<script src="https://accounts.google.com/gsi/client" async></script>
+<!-- MSAL for Outlook -->
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
+
+<script>
+// ════════════════════════════════════════════════════════════════
+//  STATE
+// ════════════════════════════════════════════════════════════════
+let API_URL       = localStorage.getItem('planner_api_url') || '';
+let GCAL_CLIENT_ID  = localStorage.getItem('gcal_client_id') || '';
+let GCAL_CAL_ID     = localStorage.getItem('gcal_cal_id') || 'primary';
+let OUTLOOK_CLIENT_ID = localStorage.getItem('outlook_client_id') || '';
+
+let tasks        = JSON.parse(localStorage.getItem('planner_tasks') || '[]');
+let gcalEvents   = JSON.parse(localStorage.getItem('gcal_events')   || '[]');
+let outlookEvents= JSON.parse(localStorage.getItem('outlook_events')|| '[]');
+
+let gcalToken    = localStorage.getItem('gcal_token') || '';
+let outlookToken = localStorage.getItem('outlook_token') || '';
+
+let sourcesOn    = { tasks: true, gcal: true, outlook: true };
+let editingId    = null;
+let selectedDate = todayStr();
+let currentCat   = 'Work';
+let calMonth     = new Date();
+let msalApp      = null;
+
+const CATS = {Work:'#4a86e8',Personal:'#2d9e6b',Health:'#d94f4f',Study:'#7c3aed',Other:'#d97706'};
+
+// ════════════════════════════════════════════════════════════════
+//  INIT
+// ════════════════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('hdr-date').textContent =
+    new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+  document.getElementById('task-date-quick').value = todayStr();
+  document.getElementById('m-date').value = todayStr();
+
+  // Restore config inputs
+  document.getElementById('api-url-input').value = API_URL;
+  document.getElementById('gcal-client-id').value = GCAL_CLIENT_ID;
+  document.getElementById('gcal-calendar-id').value = GCAL_CAL_ID !== 'primary' ? GCAL_CAL_ID : '';
+  document.getElementById('outlook-client-id').value = OUTLOOK_CLIENT_ID;
+
+  updateAuthUI();
+  updateSourcePills();
+
+  if (!API_URL && !GCAL_CLIENT_ID && !OUTLOOK_CLIENT_ID) {
+    showConfig();
+  } else {
+    if (API_URL) syncTasks();
+    if (gcalToken && GCAL_CLIENT_ID) fetchGCalEvents();
+    if (outlookToken && OUTLOOK_CLIENT_ID) fetchOutlookEvents();
+    renderToday();
+    buildMainCalendar();
+  }
+  setInterval(syncAll, 60000);
+});
+
+// ════════════════════════════════════════════════════════════════
+//  UTILS
+// ════════════════════════════════════════════════════════════════
+function todayStr(){ return new Date().toISOString().split('T')[0]; }
+function fmtTime(str){
+  if (!str) return '';
+  try {
+    const d = new Date(str);
+    if (!isNaN(d)) return d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    const [h,m] = str.split(':').map(Number);
+    return new Date(2000,0,1,h,m).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  } catch(e){ return str; }
+}
+function fmtDateLabel(ds){
+  const d = new Date(ds+'T00:00:00');
+  const today = todayStr();
+  if (ds === today) return 'Today';
+  const tom = new Date(); tom.setDate(tom.getDate()+1);
+  if (ds === tom.toISOString().split('T')[0]) return 'Tomorrow';
+  return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+}
+function setSyncStatus(state, label){
+  const dot = document.getElementById('sync-dot');
+  const lbl = document.getElementById('sync-label');
+  dot.className = 'sync-dot' + (state==='syncing'?' syncing':state==='error'?' error':'');
+  lbl.textContent = label;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  TASKS — Google Sheets API
+// ════════════════════════════════════════════════════════════════
+async function syncTasks(){
+  if (!API_URL) return;
+  setSyncStatus('syncing','Syncing...');
+  try {
+    const r = await fetch(API_URL + '?action=getTasks');
+    const data = await r.json();
+    if (data && !data.error){
+      tasks = data.map(t=>({...t, done: t.done==='TRUE'||t.done===true}));
+      localStorage.setItem('planner_tasks', JSON.stringify(tasks));
+      setSyncStatus('ok','Synced');
+      renderToday(); renderAll(); buildMainCalendar();
+    } else { setSyncStatus('error','Sheet error'); }
+  } catch(e){ setSyncStatus('error','Offline'); }
+}
+
+async function apiPost(body){
+  if (!API_URL) return;
+  await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),mode:'no-cors'});
+}
+
+function saveTasks(){ localStorage.setItem('planner_tasks',JSON.stringify(tasks)); }
+
+function addTask(task){
+  const id = 'local_'+Date.now();
+  const t = {id, done:false, ...task};
+  tasks.unshift(t); saveTasks();
+  if (API_URL){ setSyncStatus('syncing','Saving...'); apiPost({action:'addTask',data:{...t,done:'FALSE'}}).then(syncTasks); }
+  return t;
+}
+function updateTask(id, patch){
+  const i = tasks.findIndex(t=>t.id===id);
+  if (i<0) return;
+  tasks[i] = {...tasks[i],...patch}; saveTasks();
+  if (API_URL){ apiPost({action:'updateTask',id,data:{...patch,done:patch.done!==undefined?(patch.done?'TRUE':'FALSE'):undefined}}).then(syncTasks); }
+}
+function deleteTask(id){
+  tasks = tasks.filter(t=>t.id!==id); saveTasks();
+  if (API_URL) apiPost({action:'deleteTask',id}).then(syncTasks);
+}
+function toggleDone(id, el){
+  const t = tasks.find(x=>x.id===id);
+  if (!t) return;
+  updateTask(id,{done:!t.done}); t.done=!t.done;
+  el.className='check'+(t.done?' checked':'');
+  el.textContent=t.done?'✓':'';
+  el.closest('.task-item').classList.toggle('done-item',t.done);
+  refreshTodayStrip();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  GOOGLE CALENDAR
+// ════════════════════════════════════════════════════════════════
+function connectGCal(){
+  if (!GCAL_CLIENT_ID){ alert('Enter your Google Client ID in settings first'); return; }
+  // Use Google Identity Services token flow
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: GCAL_CLIENT_ID,
+    scope: 'https://www.googleapis.com/auth/calendar.readonly',
+    callback: (resp) => {
+      if (resp.error){ alert('Google auth failed: '+resp.error); return; }
+      gcalToken = resp.access_token;
+      localStorage.setItem('gcal_token', gcalToken);
+      updateAuthUI();
+      updateSourcePills();
+      fetchGCalEvents();
+    }
+  });
+  client.requestAccessToken();
+}
+
+async function fetchGCalEvents(){
+  if (!gcalToken || !GCAL_CLIENT_ID) return;
+  setSyncStatus('syncing','Fetching Google Cal...');
+  try {
+    const calId = encodeURIComponent(GCAL_CAL_ID || 'primary');
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const end   = new Date(now.getFullYear(), now.getMonth()+2, 0).toISOString();
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?timeMin=${start}&timeMax=${end}&singleEvents=true&orderBy=startTime&maxResults=200`;
+    const r = await fetch(url, {headers:{Authorization:'Bearer '+gcalToken}});
+    if (r.status === 401){ gcalToken=''; localStorage.removeItem('gcal_token'); updateAuthUI(); return; }
+    const data = await r.json();
+    gcalEvents = (data.items||[]).map(e=>({
+      id: 'gcal_'+e.id,
+      source: 'gcal',
+      title: e.summary || '(no title)',
+      start: e.start.dateTime || e.start.date,
+      end:   e.end.dateTime   || e.end.date,
+      color: e.colorId ? gcalColorHex(e.colorId) : '#1a73e8',
+      allDay: !!e.start.date && !e.start.dateTime,
+      description: e.description || '',
+      location: e.location || '',
+    }));
+    localStorage.setItem('gcal_events', JSON.stringify(gcalEvents));
+    setSyncStatus('ok','Synced');
+    renderToday(); renderAll(); buildMainCalendar();
+  } catch(e){ setSyncStatus('error','GCal error: '+e.message); }
+}
+
+function gcalColorHex(id){
+  const map={'1':'#ac725e','2':'#d06b64','3':'#f83a22','4':'#fa573c','5':'#ff7537',
+             '6':'#ffad46','7':'#42d692','8':'#16a765','9':'#7bd148','10':'#b3dc6c',
+             '11':'#fbe983','12':'#fad165','3':'#92e1c0','4':'#9fe1e7','5':'#9fc6e7',
+             '6':'#4986e7','7':'#9a9cff','8':'#b99aff','9':'#c2c2c2','10':'#cabdbf',
+             '11':'#cca6ac'};
+  return map[id] || '#1a73e8';
+}
+
+// ════════════════════════════════════════════════════════════════
+//  OUTLOOK CALENDAR  (MSAL)
+// ════════════════════════════════════════════════════════════════
+function initMsal(){
+  if (!OUTLOOK_CLIENT_ID) return;
+  msalApp = new msal.PublicClientApplication({
+    auth: {
+      clientId: OUTLOOK_CLIENT_ID,
+      authority: 'https://login.microsoftonline.com/common',
+      redirectUri: window.location.href.split('?')[0],
+    },
+    cache: { cacheLocation: 'localStorage' }
+  });
+}
+
+async function connectOutlook(){
+  if (!OUTLOOK_CLIENT_ID){ alert('Enter your Azure App Client ID first'); return; }
+  if (!msalApp) initMsal();
+  try {
+    const resp = await msalApp.loginPopup({
+      scopes: ['Calendars.Read','User.Read'],
+      prompt: 'select_account'
+    });
+    outlookToken = resp.accessToken;
+    localStorage.setItem('outlook_token', outlookToken);
+    updateAuthUI(); updateSourcePills();
+    fetchOutlookEvents();
+  } catch(e){ alert('Outlook auth failed: '+e.message); }
+}
+
+async function fetchOutlookEvents(){
+  if (!OUTLOOK_CLIENT_ID) return;
+  if (!msalApp) initMsal();
+  setSyncStatus('syncing','Fetching Outlook...');
+  try {
+    // Silent token refresh
+    const accounts = msalApp.getAllAccounts();
+    if (!accounts.length){ setSyncStatus('error','Outlook: sign in again'); return; }
+    const resp = await msalApp.acquireTokenSilent({
+      scopes: ['Calendars.Read'], account: accounts[0]
+    });
+    outlookToken = resp.accessToken;
+    localStorage.setItem('outlook_token', outlookToken);
+
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const end   = new Date(now.getFullYear(), now.getMonth()+2, 0).toISOString();
+    const url = `https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${start}&endDateTime=${end}&$top=200&$select=subject,start,end,bodyPreview,location,isAllDay`;
+    const r = await fetch(url, {headers:{Authorization:'Bearer '+outlookToken, Prefer:'outlook.timezone="UTC"'}});
+    const data = await r.json();
+    outlookEvents = (data.value||[]).map(e=>({
+      id: 'outlook_'+e.id,
+      source: 'outlook',
+      title: e.subject || '(no title)',
+      start: e.start.dateTime ? e.start.dateTime+'Z' : e.start.dateTime,
+      end:   e.end.dateTime   ? e.end.dateTime+'Z'   : e.end.dateTime,
+      color: '#0078d4',
+      allDay: e.isAllDay,
+      description: e.bodyPreview||'',
+      location: e.location?.displayName||'',
+    }));
+    localStorage.setItem('outlook_events', JSON.stringify(outlookEvents));
+    setSyncStatus('ok','Synced');
+    renderToday(); renderAll(); buildMainCalendar();
+  } catch(e){ setSyncStatus('error','Outlook error'); console.error(e); }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  COMBINED EVENTS HELPERS
+// ════════════════════════════════════════════════════════════════
+function getDateStr(isoStr){
+  if (!isoStr) return '';
+  return isoStr.split('T')[0];
+}
+function eventsForDate(ds){
+  const all = [];
+  if (sourcesOn.gcal) all.push(...gcalEvents.filter(e=>getDateStr(e.start)===ds));
+  if (sourcesOn.outlook) all.push(...outlookEvents.filter(e=>getDateStr(e.start)===ds));
+  return all.sort((a,b)=>(a.start||'').localeCompare(b.start||''));
+}
+function tasksForDate(ds){
+  if (!sourcesOn.tasks) return [];
+  return tasks.filter(t=>t.date===ds);
+}
+function allItemsForDate(ds){
+  const evts = eventsForDate(ds).map(e=>({...e,_type:'event'}));
+  const tks  = tasksForDate(ds).map(t=>({...t,_type:'task'}));
+  return [...evts,...tks].sort((a,b)=>{
+    const at = a.start || a.time || ''; const bt = b.start || b.time || '';
+    return at.localeCompare(bt);
+  });
+}
+function syncAll(){
+  if (API_URL) syncTasks();
+  if (gcalToken && GCAL_CLIENT_ID) fetchGCalEvents();
+  if (OUTLOOK_CLIENT_ID) fetchOutlookEvents();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  SOURCE TOGGLE PILLS
+// ════════════════════════════════════════════════════════════════
+function updateSourcePills(){
+  const hasGcal = gcalEvents.length > 0 || gcalToken;
+  const hasOut  = outlookEvents.length > 0 || outlookToken;
+  document.getElementById('pill-gcal').style.display    = hasGcal ? '' : 'none';
+  document.getElementById('pill-outlook').style.display = hasOut  ? '' : 'none';
+}
+function toggleSource(name, el){
+  sourcesOn[name] = !sourcesOn[name];
+  el.classList.toggle('off', !sourcesOn[name]);
+  renderToday(); renderAll(); buildMainCalendar();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  RENDER — TODAY
+// ════════════════════════════════════════════════════════════════
+function renderToday(){
+  const today = todayStr();
+  const items = allItemsForDate(today);
+  const el = document.getElementById('today-list');
+  if (!items.length){
+    el.innerHTML='<div class="empty"><div class="empty-icon">🎉</div><div class="empty-txt">Nothing for today</div></div>';
+  } else {
+    el.innerHTML = items.map(i=>i._type==='event'?eventHTML(i):taskHTML(i)).join('');
+  }
+  refreshTodayStrip();
+}
+
+function refreshTodayStrip(){
+  const today = todayStr();
+  const todayTasks  = tasks.filter(t=>t.date===today);
+  const todayEvents = eventsForDate(today);
+  const done  = todayTasks.filter(t=>t.done).length;
+  const total = todayTasks.length;
+  document.getElementById('today-strip-label').textContent =
+    `Today — ${done}/${total} tasks` + (todayEvents.length ? ` · ${todayEvents.length} events` : '');
+
+  const all = [
+    ...todayEvents.map(e=>({label:e.title,color:e.color,done:false,isEvent:true})),
+    ...todayTasks.map(t=>({label:t.title,color:CATS[t.category]||'#888',done:t.done,isEvent:false}))
+  ].slice(0,6);
+
+  document.getElementById('today-chips').innerHTML = all.length
+    ? all.map(i=>`<span class="chip${i.done?' done':''}"><span class="chip-dot" style="background:${i.color}"></span>${i.label}</span>`).join('')
+    : '<span class="chip">Nothing yet</span>';
+}
+
+// ════════════════════════════════════════════════════════════════
+//  RENDER — ALL TASKS
+// ════════════════════════════════════════════════════════════════
+function renderAll(){
+  const cat  = document.getElementById('filter-cat').value;
+  const done = document.getElementById('filter-done').value;
+  let filtered = [...tasks];
+  if (cat) filtered = filtered.filter(t=>t.category===cat);
+  if (done==='done') filtered = filtered.filter(t=>t.done);
+  if (done==='pending') filtered = filtered.filter(t=>!t.done);
+  const groups = {};
+  filtered.forEach(t=>{const k=t.date||'No date';if(!groups[k])groups[k]=[];groups[k].push(t);});
+  const sorted = Object.entries(groups).sort(([a],[b])=>a.localeCompare(b));
+  const el = document.getElementById('all-list');
+  if (!filtered.length){
+    el.innerHTML='<div class="empty"><div class="empty-icon">✅</div><div class="empty-txt">No tasks</div></div>';
+    return;
+  }
+  el.innerHTML = sorted.map(([date,tks])=>
+    `<div class="section-label">${fmtDateLabel(date)}</div>`+tks.map(t=>taskHTML(t)).join('')
+  ).join('');
+}
+
+// ════════════════════════════════════════════════════════════════
+//  HTML BUILDERS
+// ════════════════════════════════════════════════════════════════
+function taskHTML(t){
+  const color = CATS[t.category]||'#888';
+  return `<div class="task-item${t.done?' done-item':''}" id="ti-${t.id}">
+    <div class="check${t.done?' checked':''}" onclick="toggleDone('${t.id}',this)">${t.done?'✓':''}</div>
+    <div class="task-body" onclick="editTask('${t.id}')">
+      <div class="task-title"><span class="cat-dot" style="background:${color}"></span>${esc(t.title)}</div>
+      <div class="task-meta">
+        ${t.time?`<span>🕐 ${t.time}</span>`:''}
+        ${t.category?`<span style="color:${color}">${t.category}</span>`:''}
+        ${t.repeat?`<span style="color:var(--purple)">↻ ${t.repeat}</span>`:''}
+        ${t.notes?'<span>📝</span>':''}
+      </div>
+    </div>
+    <div class="task-actions">
+      <button class="act-btn del" onclick="event.stopPropagation();deleteTask('${t.id}');renderToday();renderAll();buildMainCalendar()">🗑</button>
+    </div>
+  </div>`;
+}
+
+function eventHTML(e){
+  const srcClass = e.source==='gcal'?'gcal':'outlook';
+  const srcLabel = e.source==='gcal'?'Google':'Outlook';
+  const timeStr  = e.allDay ? 'All day' : fmtTime(e.start)+(e.end?` – ${fmtTime(e.end)}`:'');
+  return `<div class="event-item" style="border-left-color:${e.color||'#4a86e8'}">
+    <div style="flex:1;min-width:0">
+      <div class="event-title">${esc(e.title)}</div>
+      <div class="event-meta">${timeStr}${e.location?' · 📍'+esc(e.location):''}
+        <span class="event-source ${srcClass}" style="margin-left:6px">${srcLabel}</span>
+      </div>
+    </div>
+  </div>`;
+}
+
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ════════════════════════════════════════════════════════════════
+//  CALENDAR GRID
+// ════════════════════════════════════════════════════════════════
+function buildMainCalendar(){
+  renderCalendar('cal-wrap', calMonth);
+  renderCalendar('main-calendar', calMonth);
+  showDayPanel(selectedDate, 'day-detail');
+  showDayPanel(selectedDate, 'main-day-tasks');
+}
+
+function renderCalendar(cid, month){
+  const el = document.getElementById(cid);
+  if (!el) return;
+  const year=month.getFullYear(), mon=month.getMonth();
+  const first=new Date(year,mon,1), last=new Date(year,mon+1,0);
+  const startDow=first.getDay();
+  const today=todayStr();
+  const dows=['Su','Mo','Tu','We','Th','Fr','Sa'];
+  let html=`<div class="cal-wrap"><div class="cal-nav">
+    <button class="icon-btn" onclick="changeMonth(-1)">‹</button>
+    <span class="cal-month">${month.toLocaleDateString('en-US',{month:'long',year:'numeric'})}</span>
+    <button class="icon-btn" onclick="changeMonth(1)">›</button>
+  </div><div class="cal-grid">
+    ${dows.map(d=>`<div class="cal-dow">${d}</div>`).join('')}`;
+
+  for(let i=0;i<startDow;i++){
+    const d=new Date(year,mon,-startDow+i+1);
+    html+=`<div class="cal-day other-month"><div class="day-num">${d.getDate()}</div></div>`;
+  }
+  for(let d=1;d<=last.getDate();d++){
+    const ds=`${year}-${String(mon+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dt=tasksForDate(ds); const de=eventsForDate(ds);
+    const isToday=ds===today, isSel=ds===selectedDate;
+    const dots=[
+      ...de.slice(0,2).map(e=>`<div class="day-dot" style="background:${e.color}"></div>`),
+      ...dt.slice(0,2).map(t=>`<div class="day-dot" style="background:${CATS[t.category]||'#888'}${t.done?';opacity:.35':''}"></div>`)
+    ].slice(0,4).join('');
+    html+=`<div class="cal-day${isToday?' today':''}${isSel&&!isToday?' selected':''}" onclick="selectDay('${ds}')">
+      <div class="day-num">${d}</div>
+      <div class="day-dots">${dots}</div>
+    </div>`;
+  }
+  html+='</div></div>';
+  el.innerHTML=html;
+}
+
+function changeMonth(dir){
+  calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth()+dir,1);
+  buildMainCalendar();
+}
+function selectDay(ds){ selectedDate=ds; buildMainCalendar(); }
+
+function showDayPanel(ds, containerId){
+  const el=document.getElementById(containerId);
+  if (!el) return;
+  const items=allItemsForDate(ds);
+  const label=fmtDateLabel(ds);
+  el.innerHTML=`<div class="day-panel">
+    <div class="day-panel-title">${label}</div>
+    ${items.length
+      ? items.map(i=>i._type==='event'?`<div class="time-block">
+          <div class="time-col" style="color:${i.color}">${i.allDay?'All day':fmtTime(i.start)}</div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:500">${esc(i.title)}</div>
+            ${i.location?`<div style="font-size:11px;color:var(--text3)">📍 ${esc(i.location)}</div>`:''}
+            <span class="event-source ${i.source==='gcal'?'gcal':'outlook'}">${i.source==='gcal'?'Google':'Outlook'}</span>
+          </div>
+        </div>`:`<div class="time-block">
+          <div class="time-col">${i.time||'—'}</div>
+          <div style="flex:1">
+            <div class="check${i.done?' checked':''}" style="display:inline-flex;margin-right:8px;vertical-align:middle" onclick="toggleDone('${i.id}',this);showDayPanel('${ds}','${containerId}')">${i.done?'✓':''}</div>
+            <span style="font-size:13px;font-weight:500${i.done?';text-decoration:line-through;color:var(--text3)':''}">${esc(i.title)}</span>
+            <span class="cat-dot" style="background:${CATS[i.category]||'#888'};margin-left:7px"></span>
+          </div>
+        </div>`
+      ).join('')
+      : '<div class="empty"><div class="empty-icon">📋</div><div class="empty-txt">Nothing scheduled</div></div>'
+    }
+    <button class="add-btn" style="width:100%;margin-top:10px" onclick="openModal('${ds}')">+ Add task for this day</button>
+  </div>`;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  QUICK ADD
+// ════════════════════════════════════════════════════════════════
+function quickAdd(){
+  const title=document.getElementById('quick-add').value.trim();
+  if (!title) return;
+  addTask({title,date:document.getElementById('task-date-quick').value||todayStr(),time:document.getElementById('task-time-quick').value||'',category:currentCat,notes:'',repeat:''});
+  document.getElementById('quick-add').value='';
+  renderToday(); renderAll(); buildMainCalendar();
+}
+function cycleCat(){
+  const cats=Object.keys(CATS);
+  currentCat=cats[(cats.indexOf(currentCat)+1)%cats.length];
+  document.getElementById('opt-cat-btn').textContent='🏷 '+currentCat;
+}
+function toggleOpt(name){
+  const el=document.getElementById('opt-'+name+'-input');
+  el.style.display=el.style.display==='none'?'block':'none';
+}
+
+// ════════════════════════════════════════════════════════════════
+//  MODAL
+// ════════════════════════════════════════════════════════════════
+function openModal(date){
+  editingId=null;
+  document.getElementById('modal-title-text').textContent='Add task';
+  document.getElementById('m-title').value='';
+  document.getElementById('m-date').value=date||todayStr();
+  document.getElementById('m-time').value='';
+  document.getElementById('m-cat').value='Work';
+  document.getElementById('m-repeat').value='';
+  document.getElementById('m-notes').value='';
+  document.getElementById('m-delete-btn').style.display='none';
+  document.getElementById('modal-bg').classList.add('open');
+  setTimeout(()=>document.getElementById('m-title').focus(),100);
+}
+function editTask(id){
+  const t=tasks.find(x=>x.id===id); if(!t) return;
+  editingId=id;
+  document.getElementById('modal-title-text').textContent='Edit task';
+  document.getElementById('m-title').value=t.title||'';
+  document.getElementById('m-date').value=t.date||'';
+  document.getElementById('m-time').value=t.time||'';
+  document.getElementById('m-cat').value=t.category||'Work';
+  document.getElementById('m-repeat').value=t.repeat||'';
+  document.getElementById('m-notes').value=t.notes||'';
+  document.getElementById('m-delete-btn').style.display='block';
+  document.getElementById('modal-bg').classList.add('open');
+}
+function closeModal(){ document.getElementById('modal-bg').classList.remove('open'); editingId=null; }
+function saveTask(){
+  const data={title:document.getElementById('m-title').value.trim(),date:document.getElementById('m-date').value,time:document.getElementById('m-time').value,category:document.getElementById('m-cat').value,repeat:document.getElementById('m-repeat').value,notes:document.getElementById('m-notes').value.trim()};
+  if (!data.title){ document.getElementById('m-title').focus(); return; }
+  if (editingId){ updateTask(editingId,data); const i=tasks.findIndex(t=>t.id===editingId); if(i>=0)tasks[i]={...tasks[i],...data}; saveTasks(); }
+  else addTask(data);
+  closeModal(); renderToday(); renderAll(); buildMainCalendar();
+}
+function deleteCurrentTask(){
+  if (!editingId||!confirm('Delete this task?')) return;
+  deleteTask(editingId); closeModal(); renderToday(); renderAll(); buildMainCalendar();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  CONFIG
+// ════════════════════════════════════════════════════════════════
+function showConfig(){
+  document.querySelectorAll('.tab-content').forEach(el=>el.style.display='none');
+  document.getElementById('config-screen').style.display='flex';
+  updateAuthUI();
+}
+function hideConfig(){
+  document.getElementById('config-screen').style.display='none';
+  document.getElementById('tab-today').style.display='flex';
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelector('.tab').classList.add('active');
+}
+function saveConfig(){
+  API_URL            = document.getElementById('api-url-input').value.trim();
+  GCAL_CLIENT_ID     = document.getElementById('gcal-client-id').value.trim();
+  GCAL_CAL_ID        = document.getElementById('gcal-calendar-id').value.trim() || 'primary';
+  OUTLOOK_CLIENT_ID  = document.getElementById('outlook-client-id').value.trim();
+  localStorage.setItem('planner_api_url',   API_URL);
+  localStorage.setItem('gcal_client_id',    GCAL_CLIENT_ID);
+  localStorage.setItem('gcal_cal_id',       GCAL_CAL_ID);
+  localStorage.setItem('outlook_client_id', OUTLOOK_CLIENT_ID);
+  if (OUTLOOK_CLIENT_ID) initMsal();
+  document.getElementById('config-msg').textContent='✓ Saved';
+  setTimeout(()=>{ hideConfig(); syncAll(); },800);
+}
+function updateAuthUI(){
+  const gcalBtn=document.getElementById('gcal-auth-btn');
+  const gcalLbl=document.getElementById('gcal-auth-label');
+  const gcalSt =document.getElementById('gcal-auth-status');
+  if (gcalToken){ gcalBtn.classList.add('connected'); gcalLbl.textContent='Google Calendar connected'; gcalSt.textContent='✓'; document.getElementById('gcal-id-field').style.display=''; }
+  else { gcalBtn.classList.remove('connected'); gcalLbl.textContent='Connect Google Calendar'; gcalSt.textContent=''; }
+  const outBtn=document.getElementById('outlook-auth-btn');
+  const outLbl=document.getElementById('outlook-auth-label');
+  const outSt =document.getElementById('outlook-auth-status');
+  if (outlookToken){ outBtn.classList.add('connected'); outLbl.textContent='Outlook Calendar connected'; outSt.textContent='✓'; }
+  else { outBtn.classList.remove('connected'); outLbl.textContent='Connect Outlook Calendar'; outSt.textContent=''; }
+}
+function exportData(){
+  const blob=new Blob([JSON.stringify(tasks,null,2)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='planner-backup.json'; a.click();
+}
+function clearLocalData(){
+  if (!confirm('Clear all local data?')) return;
+  tasks=[];gcalEvents=[];outlookEvents=[];
+  ['planner_tasks','gcal_events','outlook_events','gcal_token','outlook_token'].forEach(k=>localStorage.removeItem(k));
+  gcalToken='';outlookToken='';
+  updateAuthUI(); updateSourcePills(); renderToday(); renderAll();
+}
+
+// ════════════════════════════════════════════════════════════════
+//  TAB SWITCHING
+// ════════════════════════════════════════════════════════════════
+function switchTab(name,btn){
+  document.querySelectorAll('.tab-content').forEach(el=>el.style.display='none');
+  document.querySelectorAll('.tab').forEach(el=>el.classList.remove('active'));
+  document.getElementById('config-screen').style.display='none';
+  document.getElementById('tab-'+name).style.display='flex';
+  btn.classList.add('active');
+  if (name==='all') renderAll();
+  if (name==='calendar') buildMainCalendar();
+}
+</script>
+</body>
+</html>
