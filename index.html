@@ -267,11 +267,18 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 
     <!-- Launch buttons -->
     <div style="display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border)">
-      <button onclick="openLink('https://chat.google.com')" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;font-size:12px;font-weight:500;color:var(--text)">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" fill="#1a73e8"/><circle cx="7" cy="11" r="1.5" fill="#fff"/><circle cx="12" cy="11" r="1.5" fill="#fff"/><circle cx="17" cy="11" r="1.5" fill="#fff"/></svg>
-        Open Google Chat
-      </button>
-      <button onclick="openLink('https://slack.com')" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;font-size:12px;font-weight:500;color:var(--text)">
+      <div style="flex:1;position:relative">
+        <button onclick="toggleGChatMenu()" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;font-size:12px;font-weight:500;color:var(--text)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z" fill="#1a73e8"/><circle cx="7" cy="11" r="1.5" fill="#fff"/><circle cx="12" cy="11" r="1.5" fill="#fff"/><circle cx="17" cy="11" r="1.5" fill="#fff"/></svg>
+          Google Chat ▾
+        </button>
+        <div id="gchat-menu" style="display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);z-index:50;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,.12)">
+          <div onclick="openLink('https://chat.google.com/u/0/');hideGChatMenu()" style="padding:8px 12px;font-size:12px;cursor:pointer;color:var(--text);border-bottom:1px solid var(--border)" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">Account 1 (default)</div>
+          <div onclick="openLink('https://chat.google.com/u/1/');hideGChatMenu()" style="padding:8px 12px;font-size:12px;cursor:pointer;color:var(--text);border-bottom:1px solid var(--border)" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">Account 2</div>
+          <div onclick="openLink('https://chat.google.com/u/2/');hideGChatMenu()" style="padding:8px 12px;font-size:12px;cursor:pointer;color:var(--text)" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">Account 3</div>
+        </div>
+      </div>
+      <button onclick="openLink('https://' + (SLACK_WORKSPACE || 'slack.com'))" style="flex:1;display:flex;align-items:center;justify-content:center;gap:6px;padding:8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;font-size:12px;font-weight:500;color:var(--text)">
         <svg width="16" height="16" viewBox="0 0 24 24"><path d="M6 15a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 0v3a2 2 0 1 1-4 0v-3h4zm3-9a2 2 0 1 1 4 0 2 2 0 0 1-4 0zm0 0H6a2 2 0 1 1 0-4h3v4zm9 3a2 2 0 1 1 0 4 2 2 0 0 1 0-4zm0 0h-3v-4h3a2 2 0 1 1 0 4zm-3 9a2 2 0 1 1-4 0 2 2 0 0 1 4 0zm0 0v-3h4v3a2 2 0 1 1-4 0z" fill="#4A154B"/></svg>
         Open Slack
       </button>
@@ -1118,66 +1125,92 @@ let slackData       = [];
 
 function openLink(url){ window.open(url, '_blank'); }
 
+function toggleGChatMenu(){
+  const m = document.getElementById('gchat-menu');
+  m.style.display = m.style.display === 'none' ? 'block' : 'none';
+}
+function hideGChatMenu(){
+  const m = document.getElementById('gchat-menu');
+  if (m) m.style.display = 'none';
+}
+// Close menu if clicking outside
+document.addEventListener('click', function(e){
+  const menu = document.getElementById('gchat-menu');
+  if (menu && !menu.closest('div').contains(e.target)) hideGChatMenu();
+});
+
+async function slackFetch(endpoint){
+  // Route through CORS proxy — Slack API blocks direct browser requests
+  const url = 'https://slack.com/api/' + endpoint;
+  const proxy = 'https://corsproxy.io/?' + encodeURIComponent(url);
+  const r = await fetch(proxy, {
+    headers:{
+      'Authorization': 'Bearer ' + SLACK_TOKEN,
+      'Content-Type': 'application/json',
+    }
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
 async function refreshSlack(){
-  if (!SLACK_TOKEN){ 
-    document.getElementById('slack-empty-txt').textContent = 'Connect Slack in ⚙️ settings';
-    return; 
+  if (!SLACK_TOKEN){
+    const el = document.getElementById('slack-empty-txt');
+    if (el) el.textContent = 'Connect Slack in ⚙️ settings';
+    return;
   }
-  document.getElementById('slack-empty').style.display = 'none';
-  document.getElementById('slack-feed').innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px">Loading...</div>';
+  const feedEl = document.getElementById('slack-feed');
+  feedEl.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px">Loading...</div>';
 
   try {
     const channelNames = SLACK_CHANNELS.split(',').map(c=>c.trim()).filter(Boolean);
-    
-    // Get channel list
-    const listR = await fetch('https://slack.com/api/conversations.list?types=public_channel,private_channel&limit=200', {
-      headers:{ Authorization: 'Bearer ' + SLACK_TOKEN }
-    });
-    const listData = await listR.json();
-    if (!listData.ok) throw new Error(listData.error || 'Auth failed');
-    
+
+    // Get channel list via proxy
+    const listData = await slackFetch('conversations.list?types=public_channel,private_channel&limit=200&exclude_archived=true');
+    if (!listData.ok) throw new Error(listData.error || 'Auth failed — check your token');
+
     const allChannels = listData.channels || [];
-    // Filter to requested channels, or show all joined ones
     const channels = channelNames.length
       ? allChannels.filter(c => channelNames.includes(c.name) && c.is_member)
       : allChannels.filter(c => c.is_member).slice(0, 8);
 
-    // Fetch latest messages per channel
-    const feedItems = [];
-    for (const ch of channels){
-      const histR = await fetch(`https://slack.com/api/conversations.history?channel=${ch.id}&limit=3`, {
-        headers:{ Authorization: 'Bearer ' + SLACK_TOKEN }
-      });
-      const histData = await histR.json();
-      if (!histData.ok) continue;
-      const msgs = histData.messages || [];
-      msgs.forEach(m => {
-        feedItems.push({
-          channel: ch.name,
-          channelId: ch.id,
-          text: m.text || '',
-          ts: m.ts,
-          unread: ch.unread_count || 0,
-        });
-      });
+    if (!channels.length){
+      feedEl.innerHTML = '<div class="empty"><div class="empty-icon">💬</div><div class="empty-txt">No matching channels found.<br>Check channel names in settings.</div></div>';
+      return;
     }
 
-    // Sort by timestamp descending
+    // Fetch messages per channel
+    const feedItems = [];
+    for (const ch of channels){
+      try {
+        const histData = await slackFetch(`conversations.history?channel=${ch.id}&limit=3`);
+        if (!histData.ok) continue;
+        (histData.messages || []).forEach(m => {
+          feedItems.push({
+            channel: ch.name,
+            channelId: ch.id,
+            text: m.text || '',
+            ts: m.ts,
+            unread: ch.unread_count || 0,
+          });
+        });
+      } catch(ce){ continue; }
+    }
+
     feedItems.sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
     slackData = feedItems;
 
-    // Update badge
-    const totalUnread = channels.reduce((s,c) => s + (c.unread_count||0), 0);
+    // Badge
+    const totalUnread = channels.reduce((s,c) => s+(c.unread_count||0), 0);
     const badge = document.getElementById('msg-badge');
-    if (totalUnread > 0){ badge.style.display=''; badge.textContent=totalUnread; }
-    else badge.style.display='none';
+    if (badge){ if (totalUnread > 0){ badge.style.display=''; badge.textContent=totalUnread; } else badge.style.display='none'; }
 
     renderSlackFeed();
   } catch(e){
-    document.getElementById('slack-feed').innerHTML = 
-      `<div style="padding:16px;color:var(--red);font-size:12px;text-align:center">
-        Error: ${e.message}<br><span style="color:var(--text3);font-size:11px">Check your token and try again</span>
-      </div>`;
+    feedEl.innerHTML = `<div style="padding:16px;color:var(--red);font-size:12px;text-align:center">
+      Error: ${esc(e.message)}<br>
+      <span style="color:var(--text3);font-size:11px">Check your token in ⚙️ settings</span>
+    </div>`;
   }
 }
 
@@ -1193,7 +1226,7 @@ function renderSlackFeed(){
     const date = new Date(parseFloat(m.ts)*1000).toLocaleDateString([],{month:'short',day:'numeric'});
     const text = m.text.replace(/<[^>]+>/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').trim();
     const short = text.length > 80 ? text.slice(0,80)+'…' : text;
-    const chUrl = `https://${ws}/channels/${m.channelId}`;
+    const chUrl = `https://${ws}/archives/${m.channelId}`;
     return `<div onclick="openLink('${chUrl}')" style="padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s" onmouseenter="this.style.background='var(--surface2)'" onmouseleave="this.style.background=''">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
         <span style="font-size:11px;font-weight:700;color:var(--purple)">#${m.channel}</span>
