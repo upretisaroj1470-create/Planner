@@ -293,6 +293,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
       <div style="font-size:11px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.5px">Slack Messages</div>
       <div style="display:flex;gap:5px">
         <button onclick="openCompose()" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--accent);color:#fff;cursor:pointer">✏️ New</button>
+        <button onclick="debugSlack()" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--amber);color:#fff;cursor:pointer">🔍 Debug</button>
         <button onclick="refreshSlack()" style="font-size:11px;padding:3px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;color:var(--text2)">Refresh</button>
       </div>
     </div>
@@ -1275,6 +1276,50 @@ document.addEventListener('click', function(e){
   if (wrapper && !wrapper.contains(e.target)) hideGChatMenu();
 });
 
+async function debugSlack(){
+  const feedEl = document.getElementById('slack-feed');
+  feedEl.innerHTML = '<div style="padding:12px;font-size:11px;font-family:monospace;color:var(--text2);white-space:pre-wrap">Debug running...</div>';
+  let out = '';
+  try {
+    // Test 1: auth.test — is token valid?
+    const auth = await slackFetch('auth.test');
+    out += 'auth.test → ok=' + auth.ok + (auth.ok ? (' user=' + auth.user + ' team=' + auth.team) : ' error=' + auth.error) + '\n\n';
+
+    // Test 2: users.conversations for IMs
+    const im = await slackFetch('users.conversations?types=im&limit=100');
+    out += 'users.conversations (im) → ok=' + im.ok + ' count=' + (im.channels ? im.channels.length : 0) + (im.error ? ' error=' + im.error : '') + '\n';
+    if (im.channels && im.channels.length){
+      out += '  first 5 DMs: ' + im.channels.slice(0,5).map(c => c.id + '(user:' + c.user + ')').join(', ') + '\n';
+    }
+    out += '\n';
+
+    // Test 3: users.conversations for mpim
+    const mpim = await slackFetch('users.conversations?types=mpim&limit=50');
+    out += 'users.conversations (mpim) → ok=' + mpim.ok + ' count=' + (mpim.channels ? mpim.channels.length : 0) + (mpim.error ? ' error=' + mpim.error : '') + '\n\n';
+
+    // Test 4: conversations.list with im included (older API path)
+    const listAll = await slackFetch('conversations.list?types=im,mpim&limit=100');
+    out += 'conversations.list (im,mpim) → ok=' + listAll.ok + ' count=' + (listAll.channels ? listAll.channels.length : 0) + (listAll.error ? ' error=' + listAll.error : '') + '\n\n';
+
+    // Test 5: sample message from first DM if available
+    const firstDM = (im.channels || [])[0];
+    if (firstDM){
+      const hist = await slackFetch('conversations.history?channel=' + firstDM.id + '&limit=1');
+      out += 'sample DM history → ok=' + hist.ok + ' msgs=' + (hist.messages ? hist.messages.length : 0) + (hist.error ? ' error=' + hist.error : '') + '\n';
+      if (hist.messages && hist.messages[0]){
+        const m = hist.messages[0];
+        const d = new Date(parseFloat(m.ts) * 1000);
+        out += '  latest: ' + d.toLocaleString() + '\n';
+        out += '  text: ' + (m.text || '(empty)').slice(0, 80) + '\n';
+      }
+    }
+
+    feedEl.innerHTML = '<div style="padding:12px;font-size:11px;font-family:monospace;color:var(--text);white-space:pre-wrap;background:var(--surface2);border-radius:6px;margin:8px">' + esc(out) + '</div>';
+  } catch(e){
+    feedEl.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red);font-family:monospace;white-space:pre-wrap">DEBUG ERROR: ' + esc(e.message) + '\n\n' + out + '</div>';
+  }
+}
+
 async function slackFetch(endpoint){
   // Route through CORS proxy — Slack API blocks direct browser requests
   const url = 'https://slack.com/api/' + endpoint;
@@ -1301,101 +1346,80 @@ async function refreshSlack(){
   try {
     const channelNames = SLACK_CHANNELS.split(',').map(c=>c.trim()).filter(Boolean);
 
-    // Get channel list via proxy
-    // Fetch channels and DMs separately for reliability
-    // include_latest=true gives us last_message_ts for sorting by activity
-    const [chanData, imData, mpimData] = await Promise.all([
-      slackFetch('conversations.list?types=public_channel,private_channel&limit=200&exclude_archived=true&include_latest=true'),
-      slackFetch('conversations.list?types=im&limit=100&include_latest=true'),
-      slackFetch('conversations.list?types=mpim&limit=50&include_latest=true'),
+    // Fetch channels, DMs, group DMs in parallel
+    const [chanData, imData, mpimData, usersData] = await Promise.all([
+      slackFetch('conversations.list?types=public_channel,private_channel&limit=200&exclude_archived=true'),
+      slackFetch('users.conversations?types=im&limit=100'),
+      slackFetch('users.conversations?types=mpim&limit=50'),
+      slackFetch('users.list?limit=500'),
     ]);
 
-    if (!chanData.ok) throw new Error(chanData.error || 'Auth failed — check your token');
+    if (!chanData.ok) throw new Error(chanData.error || 'Auth failed — check token');
 
-    const allChannels = [
-      ...(chanData.channels || []),
-      ...(imData.channels  || []),
-      ...(mpimData.channels || []),
-    ];
-
-    // Resolve DM user names in one batch call
-    const dmList = allChannels.filter(c => c.is_im && c.user);
-    if (dmList.length > 0){
-      try {
-        const usersData = await slackFetch('users.list?limit=200');
-        if (usersData.ok){
-          const userMap = {};
-          (usersData.members || []).forEach(u => { userMap[u.id] = u.real_name || u.name || 'DM'; });
-          dmList.forEach(c => { c.name = userMap[c.user] || 'DM'; });
-        }
-      } catch(ue){ dmList.forEach(c => { c.name = c.name || 'DM'; }); }
-    }
-    // Name group DMs
-    allChannels.filter(c => c.is_mpim).forEach(c => {
-      c.name = c.name ? c.name.split('--').join(' · ') : 'Group DM';
+    // Build user id → name map
+    const userMap = {};
+    (usersData.members || []).forEach(u => {
+      userMap[u.id] = u.real_name || u.name || u.id;
     });
 
-    // Sort ALL channels by most recent activity first
-    allChannels.sort((a, b) => {
-      const at = parseFloat(a.last_message_ts || a.latest_ts || 0);
-      const bt = parseFloat(b.last_message_ts || b.latest_ts || 0);
-      return bt - at;
-    });
+    const publicChans = (chanData.channels || []).filter(c => c.is_member);
+    const dms         = (imData.channels || []).filter(c => !c.is_user_deleted);
+    const groupDms    = (mpimData.channels || []);
 
-    let channels;
+    // Give DMs proper names
+    dms.forEach(c => { c.name = userMap[c.user] || 'DM'; c.isDMFlag = true; });
+    groupDms.forEach(c => { c.name = c.name ? c.name.split('--').join(' · ') : 'Group DM'; c.isDMFlag = true; });
+
+    let candidates;
     if (channelNames.length){
-      channels = allChannels.filter(c =>
+      candidates = [...publicChans, ...dms, ...groupDms].filter(c =>
         channelNames.includes(c.name) || channelNames.includes('#'+c.name)
       );
     } else {
-      // Show most recently active channels and DMs, no old ones
-      const cutoff = (Date.now() / 1000) - (30 * 24 * 60 * 60); // last 30 days
-      const active = allChannels.filter(c => {
-        const ts = parseFloat(c.last_message_ts || c.latest_ts || 0);
-        return ts > cutoff && (c.is_member !== false);
-      });
-      channels = active.slice(0, 15); // top 15 most recently active
+      // Take up to 30 candidates — will filter to only those with recent messages
+      candidates = [...dms, ...groupDms, ...publicChans.slice(0, 15)].slice(0, 30);
     }
 
-    if (!channels.length){
-      feedEl.innerHTML = '<div class="empty"><div class="empty-icon">💬</div><div class="empty-txt">No matching channels found.<br>Check channel names in settings.</div></div>';
+    if (!candidates.length){
+      feedEl.innerHTML = '<div class="empty"><div class="empty-icon">💬</div><div class="empty-txt">No conversations found</div></div>';
       return;
     }
 
-    // Fetch messages per channel
-    const feedItems = [];
-    for (const ch of channels){
+    // Fetch latest message from each candidate in parallel
+    const cutoff = (Date.now() / 1000) - (30 * 24 * 60 * 60); // 30 days
+    const historyPromises = candidates.map(async ch => {
       try {
-        const histData = await slackFetch(`conversations.history?channel=${ch.id}&limit=3`);
-        if (!histData.ok) continue;
-        // Only take the latest message per channel — use channel's unread_count
-      const msgs = histData.messages || [];
-      if (msgs.length > 0){
-        const latest = msgs[0]; // already sorted newest first by Slack
-        feedItems.push({
-          channel: ch.name,
+        const h = await slackFetch(`conversations.history?channel=${ch.id}&limit=1`);
+        if (!h.ok || !h.messages || !h.messages.length) return null;
+        const latest = h.messages[0];
+        const ts = parseFloat(latest.ts);
+        if (ts < cutoff) return null;   // skip old convos
+        return {
+          channel: ch.name || 'Unknown',
           channelId: ch.id,
           text: latest.text || '',
           ts: latest.ts,
           unread: ch.unread_count || 0,
-          isDM: !!(ch.is_im || ch.is_mpim),
-        });
-      }
-      } catch(ce){ continue; }
-    }
+          isDM: !!(ch.is_im || ch.is_mpim || ch.isDMFlag),
+        };
+      } catch(e){ return null; }
+    });
 
-    // Sort: within each channel take only the latest message
-    // Then separate into unread vs read, each sorted newest first
-    const unread = feedItems.filter(m => m.unread > 0)
-                            .sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
-    const read   = feedItems.filter(m => !m.unread)
-                            .sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
+    const results = await Promise.all(historyPromises);
+    const feedItems = results.filter(Boolean);
+
+    // Split into unread / read, each sorted newest first
+    const unread = feedItems.filter(m => m.unread > 0).sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
+    const read   = feedItems.filter(m => !m.unread).sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
     slackData = [...unread, ...read];
 
-    // Badge — total unread count across all channels
-    const totalUnread = channels.reduce((s,c) => s+(c.unread_count||0), 0);
+    // Update badge
+    const totalUnread = feedItems.reduce((s,m) => s + m.unread, 0);
     const badge = document.getElementById('msg-badge');
-    if (badge){ if (totalUnread > 0){ badge.style.display=''; badge.textContent=totalUnread; } else badge.style.display='none'; }
+    if (badge){
+      if (totalUnread > 0){ badge.style.display=''; badge.textContent=totalUnread; }
+      else badge.style.display='none';
+    }
 
     renderSlackFeed();
   } catch(e){
@@ -1483,6 +1507,50 @@ document.addEventListener('click', function(e){
   if (wrapper && !wrapper.contains(e.target)) hideGChatMenu();
 });
 
+async function debugSlack(){
+  const feedEl = document.getElementById('slack-feed');
+  feedEl.innerHTML = '<div style="padding:12px;font-size:11px;font-family:monospace;color:var(--text2);white-space:pre-wrap">Debug running...</div>';
+  let out = '';
+  try {
+    // Test 1: auth.test — is token valid?
+    const auth = await slackFetch('auth.test');
+    out += 'auth.test → ok=' + auth.ok + (auth.ok ? (' user=' + auth.user + ' team=' + auth.team) : ' error=' + auth.error) + '\n\n';
+
+    // Test 2: users.conversations for IMs
+    const im = await slackFetch('users.conversations?types=im&limit=100');
+    out += 'users.conversations (im) → ok=' + im.ok + ' count=' + (im.channels ? im.channels.length : 0) + (im.error ? ' error=' + im.error : '') + '\n';
+    if (im.channels && im.channels.length){
+      out += '  first 5 DMs: ' + im.channels.slice(0,5).map(c => c.id + '(user:' + c.user + ')').join(', ') + '\n';
+    }
+    out += '\n';
+
+    // Test 3: users.conversations for mpim
+    const mpim = await slackFetch('users.conversations?types=mpim&limit=50');
+    out += 'users.conversations (mpim) → ok=' + mpim.ok + ' count=' + (mpim.channels ? mpim.channels.length : 0) + (mpim.error ? ' error=' + mpim.error : '') + '\n\n';
+
+    // Test 4: conversations.list with im included (older API path)
+    const listAll = await slackFetch('conversations.list?types=im,mpim&limit=100');
+    out += 'conversations.list (im,mpim) → ok=' + listAll.ok + ' count=' + (listAll.channels ? listAll.channels.length : 0) + (listAll.error ? ' error=' + listAll.error : '') + '\n\n';
+
+    // Test 5: sample message from first DM if available
+    const firstDM = (im.channels || [])[0];
+    if (firstDM){
+      const hist = await slackFetch('conversations.history?channel=' + firstDM.id + '&limit=1');
+      out += 'sample DM history → ok=' + hist.ok + ' msgs=' + (hist.messages ? hist.messages.length : 0) + (hist.error ? ' error=' + hist.error : '') + '\n';
+      if (hist.messages && hist.messages[0]){
+        const m = hist.messages[0];
+        const d = new Date(parseFloat(m.ts) * 1000);
+        out += '  latest: ' + d.toLocaleString() + '\n';
+        out += '  text: ' + (m.text || '(empty)').slice(0, 80) + '\n';
+      }
+    }
+
+    feedEl.innerHTML = '<div style="padding:12px;font-size:11px;font-family:monospace;color:var(--text);white-space:pre-wrap;background:var(--surface2);border-radius:6px;margin:8px">' + esc(out) + '</div>';
+  } catch(e){
+    feedEl.innerHTML = '<div style="padding:12px;font-size:11px;color:var(--red);font-family:monospace;white-space:pre-wrap">DEBUG ERROR: ' + esc(e.message) + '\n\n' + out + '</div>';
+  }
+}
+
 async function slackFetch(endpoint){
   // Route through CORS proxy — Slack API blocks direct browser requests
   const url = 'https://slack.com/api/' + endpoint;
@@ -1509,101 +1577,80 @@ async function refreshSlack(){
   try {
     const channelNames = SLACK_CHANNELS.split(',').map(c=>c.trim()).filter(Boolean);
 
-    // Get channel list via proxy
-    // Fetch channels and DMs separately for reliability
-    // include_latest=true gives us last_message_ts for sorting by activity
-    const [chanData, imData, mpimData] = await Promise.all([
-      slackFetch('conversations.list?types=public_channel,private_channel&limit=200&exclude_archived=true&include_latest=true'),
-      slackFetch('conversations.list?types=im&limit=100&include_latest=true'),
-      slackFetch('conversations.list?types=mpim&limit=50&include_latest=true'),
+    // Fetch channels, DMs, group DMs in parallel
+    const [chanData, imData, mpimData, usersData] = await Promise.all([
+      slackFetch('conversations.list?types=public_channel,private_channel&limit=200&exclude_archived=true'),
+      slackFetch('users.conversations?types=im&limit=100'),
+      slackFetch('users.conversations?types=mpim&limit=50'),
+      slackFetch('users.list?limit=500'),
     ]);
 
-    if (!chanData.ok) throw new Error(chanData.error || 'Auth failed — check your token');
+    if (!chanData.ok) throw new Error(chanData.error || 'Auth failed — check token');
 
-    const allChannels = [
-      ...(chanData.channels || []),
-      ...(imData.channels  || []),
-      ...(mpimData.channels || []),
-    ];
-
-    // Resolve DM user names in one batch call
-    const dmList = allChannels.filter(c => c.is_im && c.user);
-    if (dmList.length > 0){
-      try {
-        const usersData = await slackFetch('users.list?limit=200');
-        if (usersData.ok){
-          const userMap = {};
-          (usersData.members || []).forEach(u => { userMap[u.id] = u.real_name || u.name || 'DM'; });
-          dmList.forEach(c => { c.name = userMap[c.user] || 'DM'; });
-        }
-      } catch(ue){ dmList.forEach(c => { c.name = c.name || 'DM'; }); }
-    }
-    // Name group DMs
-    allChannels.filter(c => c.is_mpim).forEach(c => {
-      c.name = c.name ? c.name.split('--').join(' · ') : 'Group DM';
+    // Build user id → name map
+    const userMap = {};
+    (usersData.members || []).forEach(u => {
+      userMap[u.id] = u.real_name || u.name || u.id;
     });
 
-    // Sort ALL channels by most recent activity first
-    allChannels.sort((a, b) => {
-      const at = parseFloat(a.last_message_ts || a.latest_ts || 0);
-      const bt = parseFloat(b.last_message_ts || b.latest_ts || 0);
-      return bt - at;
-    });
+    const publicChans = (chanData.channels || []).filter(c => c.is_member);
+    const dms         = (imData.channels || []).filter(c => !c.is_user_deleted);
+    const groupDms    = (mpimData.channels || []);
 
-    let channels;
+    // Give DMs proper names
+    dms.forEach(c => { c.name = userMap[c.user] || 'DM'; c.isDMFlag = true; });
+    groupDms.forEach(c => { c.name = c.name ? c.name.split('--').join(' · ') : 'Group DM'; c.isDMFlag = true; });
+
+    let candidates;
     if (channelNames.length){
-      channels = allChannels.filter(c =>
+      candidates = [...publicChans, ...dms, ...groupDms].filter(c =>
         channelNames.includes(c.name) || channelNames.includes('#'+c.name)
       );
     } else {
-      // Show most recently active channels and DMs, no old ones
-      const cutoff = (Date.now() / 1000) - (30 * 24 * 60 * 60); // last 30 days
-      const active = allChannels.filter(c => {
-        const ts = parseFloat(c.last_message_ts || c.latest_ts || 0);
-        return ts > cutoff && (c.is_member !== false);
-      });
-      channels = active.slice(0, 15); // top 15 most recently active
+      // Take up to 30 candidates — will filter to only those with recent messages
+      candidates = [...dms, ...groupDms, ...publicChans.slice(0, 15)].slice(0, 30);
     }
 
-    if (!channels.length){
-      feedEl.innerHTML = '<div class="empty"><div class="empty-icon">💬</div><div class="empty-txt">No matching channels found.<br>Check channel names in settings.</div></div>';
+    if (!candidates.length){
+      feedEl.innerHTML = '<div class="empty"><div class="empty-icon">💬</div><div class="empty-txt">No conversations found</div></div>';
       return;
     }
 
-    // Fetch messages per channel
-    const feedItems = [];
-    for (const ch of channels){
+    // Fetch latest message from each candidate in parallel
+    const cutoff = (Date.now() / 1000) - (30 * 24 * 60 * 60); // 30 days
+    const historyPromises = candidates.map(async ch => {
       try {
-        const histData = await slackFetch(`conversations.history?channel=${ch.id}&limit=3`);
-        if (!histData.ok) continue;
-        // Only take the latest message per channel — use channel's unread_count
-      const msgs = histData.messages || [];
-      if (msgs.length > 0){
-        const latest = msgs[0]; // already sorted newest first by Slack
-        feedItems.push({
-          channel: ch.name,
+        const h = await slackFetch(`conversations.history?channel=${ch.id}&limit=1`);
+        if (!h.ok || !h.messages || !h.messages.length) return null;
+        const latest = h.messages[0];
+        const ts = parseFloat(latest.ts);
+        if (ts < cutoff) return null;   // skip old convos
+        return {
+          channel: ch.name || 'Unknown',
           channelId: ch.id,
           text: latest.text || '',
           ts: latest.ts,
           unread: ch.unread_count || 0,
-          isDM: !!(ch.is_im || ch.is_mpim),
-        });
-      }
-      } catch(ce){ continue; }
-    }
+          isDM: !!(ch.is_im || ch.is_mpim || ch.isDMFlag),
+        };
+      } catch(e){ return null; }
+    });
 
-    // Sort: within each channel take only the latest message
-    // Then separate into unread vs read, each sorted newest first
-    const unread = feedItems.filter(m => m.unread > 0)
-                            .sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
-    const read   = feedItems.filter(m => !m.unread)
-                            .sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
+    const results = await Promise.all(historyPromises);
+    const feedItems = results.filter(Boolean);
+
+    // Split into unread / read, each sorted newest first
+    const unread = feedItems.filter(m => m.unread > 0).sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
+    const read   = feedItems.filter(m => !m.unread).sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
     slackData = [...unread, ...read];
 
-    // Badge — total unread count across all channels
-    const totalUnread = channels.reduce((s,c) => s+(c.unread_count||0), 0);
+    // Update badge
+    const totalUnread = feedItems.reduce((s,m) => s + m.unread, 0);
     const badge = document.getElementById('msg-badge');
-    if (badge){ if (totalUnread > 0){ badge.style.display=''; badge.textContent=totalUnread; } else badge.style.display='none'; }
+    if (badge){
+      if (totalUnread > 0){ badge.style.display=''; badge.textContent=totalUnread; }
+      else badge.style.display='none';
+    }
 
     renderSlackFeed();
   } catch(e){
