@@ -206,9 +206,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
     <div class="source-pill gcal" id="pill-gcal" onclick="toggleSource('gcal',this)" style="display:none">
       <div class="source-dot"></div> Google Cal
     </div>
-    <div class="source-pill outlook" id="pill-outlook" onclick="toggleSource('outlook',this)" style="display:none">
-      <div class="source-dot"></div> Outlook
-    </div>
+
   </div>
 
   <!-- Tabs -->
@@ -303,17 +301,10 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);font-size:14
 
       <!-- Outlook Calendar -->
       <div class="config-section">
-        <div class="config-section-title">📆 Outlook Calendar (ICS feed)</div>
-        <div class="config-field">
-          <label>Outlook ICS URL</label>
-          <input type="text" id="outlook-ics-url" placeholder="https://outlook.office365.com/owa/calendar/.../calendar.ics">
-          <small>Outlook → Settings ⚙️ → View all settings → Calendar → Shared calendars → Publish → copy ICS link</small>
+        <div class="config-section-title">📆 Outlook Calendar</div>
+        <div style="font-size:12px;color:var(--text3);line-height:1.6;padding:8px 10px;background:var(--surface2);border-radius:var(--r)">
+          Share your Outlook calendar to <strong style="color:var(--text2)">supreti@lbl.gov</strong> in Outlook settings, then accept the invite in Gmail. It will appear automatically here through your Google Calendar connection.
         </div>
-        <button class="auth-btn" id="outlook-auth-btn" onclick="connectOutlookICS()">
-          <span class="auth-icon">📆</span>
-          <span id="outlook-auth-label">Load Outlook Calendar</span>
-          <span class="auth-status" id="outlook-auth-status"></span>
-        </button>
       </div>
 
       <button class="save-btn" onclick="saveConfig()">Save &amp; Apply</button>
@@ -539,25 +530,46 @@ async function fetchGCalEvents(){
   if (!gcalToken || !GCAL_CLIENT_ID) return;
   setSyncStatus('syncing','Fetching Google Cal...');
   try {
-    const calId = encodeURIComponent(GCAL_CAL_ID || 'primary');
-    const now = new Date();
+    const now   = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     const end   = new Date(now.getFullYear(), now.getMonth()+2, 0).toISOString();
-    const url = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?timeMin=${start}&timeMax=${end}&singleEvents=true&orderBy=startTime&maxResults=200`;
-    const r = await fetch(url, {headers:{Authorization:'Bearer '+gcalToken}});
-    if (r.status === 401){ gcalToken=''; localStorage.removeItem('gcal_token'); updateAuthUI(); return; }
-    const data = await r.json();
-    gcalEvents = (data.items||[]).map(e=>({
-      id: 'gcal_'+e.id,
-      source: 'gcal',
-      title: e.summary || '(no title)',
-      start: e.start.dateTime || e.start.date,
-      end:   e.end.dateTime   || e.end.date,
-      color: e.colorId ? gcalColorHex(e.colorId) : '#1a73e8',
-      allDay: !!e.start.date && !e.start.dateTime,
-      description: e.description || '',
-      location: e.location || '',
-    }));
+
+    // Step 1: get ALL calendars in this account (includes subscribed Outlook ones)
+    const listR = await fetch(
+      'https://www.googleapis.com/calendar/v3/users/me/calendarList',
+      {headers:{Authorization:'Bearer '+gcalToken}}
+    );
+    if (listR.status === 401){ gcalToken=''; localStorage.removeItem('gcal_token'); updateAuthUI(); return; }
+    const listData = await listR.json();
+    const calendars = (listData.items || []).filter(c => c.selected !== false);
+
+    // Step 2: fetch events from every calendar
+    const allEvents = [];
+    for (const cal of calendars){
+      try {
+        const calId = encodeURIComponent(cal.id);
+        const url = `https://www.googleapis.com/calendar/v3/calendars/${calId}/events?timeMin=${start}&timeMax=${end}&singleEvents=true&orderBy=startTime&maxResults=200`;
+        const r = await fetch(url, {headers:{Authorization:'Bearer '+gcalToken}});
+        if (!r.ok) continue;
+        const data = await r.json();
+        const color = cal.backgroundColor || '#1a73e8';
+        (data.items||[]).forEach(e=>{
+          allEvents.push({
+            id: 'gcal_'+e.id,
+            source: 'gcal',
+            calendarName: cal.summary || '',
+            title: e.summary || '(no title)',
+            start: e.start.dateTime || e.start.date,
+            end:   e.end.dateTime   || e.end.date,
+            color: e.colorId ? gcalColorHex(e.colorId) : color,
+            allDay: !!e.start.date && !e.start.dateTime,
+            description: e.description || '',
+            location: e.location || '',
+          });
+        });
+      } catch(ce){ continue; }
+    }
+    gcalEvents = allEvents;
     localStorage.setItem('gcal_events', JSON.stringify(gcalEvents));
     setSyncStatus('ok','Synced');
     renderToday(); renderAll(); buildMainCalendar();
@@ -590,12 +602,30 @@ async function fetchOutlookICS(){
   if (!OUTLOOK_ICS_URL) return;
   setSyncStatus('syncing','Fetching Outlook...');
   try {
-    // Use a CORS proxy to fetch the ICS file
-    const proxyUrl = 'https://api.allorigins.win/get?url=' + encodeURIComponent(OUTLOOK_ICS_URL);
-    const r = await fetch(proxyUrl);
-    const data = await r.json();
-    if (!data.contents) throw new Error('Empty response');
-    const events = parseICS(data.contents);
+    // Try multiple CORS proxies in order
+    const proxies = [
+      'https://corsproxy.io/?' + encodeURIComponent(OUTLOOK_ICS_URL),
+      'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(OUTLOOK_ICS_URL),
+      'https://api.allorigins.win/get?url=' + encodeURIComponent(OUTLOOK_ICS_URL),
+    ];
+    let icsText = null;
+    for (const proxyUrl of proxies) {
+      try {
+        const r = await fetch(proxyUrl, {signal: AbortSignal.timeout(8000)});
+        if (!r.ok) continue;
+        const ct = r.headers.get('content-type') || '';
+        if (ct.includes('json')) {
+          const data = await r.json();
+          icsText = data.contents || data.data || null;
+        } else {
+          icsText = await r.text();
+        }
+        if (icsText && icsText.includes('BEGIN:VCALENDAR')) break;
+        icsText = null;
+      } catch(pe) { continue; }
+    }
+    if (!icsText) throw new Error('All proxies failed');
+    const events = parseICS(icsText);
     outlookEvents = events;
     localStorage.setItem('outlook_events', JSON.stringify(outlookEvents));
     outlookToken = 'ics'; // mark as connected
