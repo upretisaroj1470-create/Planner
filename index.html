@@ -1026,13 +1026,10 @@ function updateAuthUI(){
   const gcalBtn=document.getElementById('gcal-auth-btn');
   const gcalLbl=document.getElementById('gcal-auth-label');
   const gcalSt =document.getElementById('gcal-auth-status');
-  if (gcalToken){ gcalBtn.classList.add('connected'); gcalLbl.textContent='Google Calendar connected'; gcalSt.textContent='✓'; document.getElementById('gcal-id-field').style.display=''; }
-  else { gcalBtn.classList.remove('connected'); gcalLbl.textContent='Connect Google Calendar'; gcalSt.textContent=''; }
-  const outBtn=document.getElementById('outlook-auth-btn');
-  const outLbl=document.getElementById('outlook-auth-label');
-  const outSt =document.getElementById('outlook-auth-status');
-  if (outlookToken){ outBtn.classList.add('connected'); outLbl.textContent='Outlook Calendar connected ✓'; outSt.textContent='✓'; }
-  else { outBtn.classList.remove('connected'); outLbl.textContent='Load Outlook Calendar'; outSt.textContent=''; }
+  if (gcalBtn){
+    if (gcalToken){ gcalBtn.classList.add('connected'); gcalLbl.textContent='Google Calendar connected'; gcalSt.textContent='✓'; const f=document.getElementById('gcal-id-field'); if(f) f.style.display=''; }
+    else { gcalBtn.classList.remove('connected'); gcalLbl.textContent='Connect Google Calendar'; gcalSt.textContent=''; }
+  }
 }
 function exportData(){
   const blob=new Blob([JSON.stringify(tasks,null,2)],{type:'application/json'});
