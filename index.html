@@ -1398,6 +1398,204 @@ function renderSlackFeed(){
     el.innerHTML = '<div class="empty"><div class="empty-icon">💬</div><div class="empty-txt">No messages found</div></div>';
     return;
   }
+  const ws     = SLACK_WORKSPACE || 'slack.com';
+  const unread = slackData.filter(m => m.unread > 0);
+  const read   = slackData.filter(m => !m.unread);
+
+  let html = '';
+  if (unread.length){
+    html += '<div style="padding:5px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent);background:var(--accent-l);border-bottom:1px solid var(--border)">🔴 Unread (' + unread.length + ')</div>';
+    html += unread.map(m => buildMsgHTML(m, ws, true)).join('');
+  }
+  if (read.length){
+    const topBorder = unread.length ? 'border-top:2px solid var(--border);' : '';
+    html += '<div style="padding:5px 12px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text3);background:var(--surface2);border-bottom:1px solid var(--border);' + topBorder + '">Read</div>';
+    html += read.map(m => buildMsgHTML(m, ws, false)).join('');
+  }
+  el.innerHTML = html;
+}
+
+function buildMsgHTML(m, ws, isUnread){
+  const bg       = isUnread ? 'var(--accent-l)' : 'transparent';
+  const isDM     = m.isDM;
+  const label    = isDM ? '👤 ' + m.channel : '# ' + m.channel;
+  const color    = isDM ? 'var(--green)' : 'var(--purple)';
+  const msgId    = 'msg-' + m.ts.split('.').join('');
+  const chUrl    = 'https://' + ws + '/archives/' + m.channelId;
+  const time     = new Date(parseFloat(m.ts)*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+  const date     = new Date(parseFloat(m.ts)*1000).toLocaleDateString([],{month:'short',day:'numeric'});
+  const rawText  = (m.text || '').split('<').join(' ').split('>').join(' ')
+                    .split('&amp;').join('&').split('&lt;').join('<').split('&gt;').join('>').trim();
+  const short    = rawText.length > 80 ? rawText.slice(0,80) + '…' : rawText;
+  const display  = esc(short) || '<em style="color:var(--text3)">attachment or media</em>';
+
+  return '<div style="padding:9px 12px;border-bottom:1px solid var(--border);background:' + bg + '">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">'
+    +   '<span style="font-size:11px;font-weight:700;color:' + color + ';cursor:pointer" onclick="openLink(\'' + chUrl + '\')">' + label + '</span>'
+    +   '<div style="display:flex;align-items:center;gap:6px">'
+    +     '<span style="font-size:10px;color:var(--text3)">' + date + ' ' + time + '</span>'
+    +     '<button onclick="openReply(\'' + m.channelId + '\',\'' + m.channel + '\',\'' + m.ts + '\',\'' + msgId + '\')" style="font-size:10px;padding:2px 6px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface2);cursor:pointer;color:var(--text2)">↩ Reply</button>'
+    +   '</div>'
+    + '</div>'
+    + '<div style="font-size:12px;color:var(--text);line-height:1.4;cursor:pointer" onclick="openLink(\'' + chUrl + '\')">' + display + '</div>'
+    + (m.unread ? '<div style="font-size:10px;color:var(--accent);margin-top:2px">' + m.unread + ' unread</div>' : '')
+    + '<div id="' + msgId + '" style="display:none;margin-top:7px">'
+    +   '<div style="display:flex;gap:6px">'
+    +     '<textarea rows="2" id="reply-text-' + msgId + '" placeholder="Reply in thread..." style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:var(--r);background:var(--surface);color:var(--text);font-size:12px;outline:none;resize:none;font-family:var(--font)"></textarea>'
+    +     '<div style="display:flex;flex-direction:column;gap:4px">'
+    +       '<button onclick="sendReply(\'' + m.channelId + '\',\'' + m.ts + '\',\'' + msgId + '\')" style="padding:6px 10px;background:var(--accent);color:#fff;border:none;border-radius:var(--r);cursor:pointer;font-size:12px">Send</button>'
+    +       '<button onclick="closeReply(\'' + msgId + '\')" style="padding:6px 10px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;font-size:12px;color:var(--text2)">✕</button>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div id="reply-status-' + msgId + '" style="font-size:11px;margin-top:4px;color:var(--green)"></div>'
+    + '</div>'
+    + '</div>';
+}
+
+
+function toggleGChatMenu(){
+  const m = document.getElementById('gchat-menu');
+  m.style.display = m.style.display === 'none' ? 'block' : 'none';
+}
+function hideGChatMenu(){
+  const m = document.getElementById('gchat-menu');
+  if (m) m.style.display = 'none';
+}
+// Close menu if clicking outside
+document.addEventListener('click', function(e){
+  const menu = document.getElementById('gchat-menu');
+  if (!menu) return;
+  const wrapper = document.getElementById('gchat-wrapper');
+  if (wrapper && !wrapper.contains(e.target)) hideGChatMenu();
+});
+
+async function slackFetch(endpoint){
+  // Route through CORS proxy — Slack API blocks direct browser requests
+  const url = 'https://slack.com/api/' + endpoint;
+  const proxy = 'https://corsproxy.io/?' + encodeURIComponent(url);
+  const r = await fetch(proxy, {
+    headers:{
+      'Authorization': 'Bearer ' + SLACK_TOKEN,
+      'Content-Type': 'application/json',
+    }
+  });
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+async function refreshSlack(){
+  if (!SLACK_TOKEN){
+    const el = document.getElementById('slack-empty-txt');
+    if (el) el.textContent = 'Connect Slack in ⚙️ settings';
+    return;
+  }
+  const feedEl = document.getElementById('slack-feed');
+  feedEl.innerHTML = '<div style="padding:16px;text-align:center;color:var(--text3);font-size:12px">Loading...</div>';
+
+  try {
+    const channelNames = SLACK_CHANNELS.split(',').map(c=>c.trim()).filter(Boolean);
+
+    // Get channel list via proxy
+    // Fetch channels and DMs separately for reliability
+    const [chanData, imData, mpimData] = await Promise.all([
+      slackFetch('conversations.list?types=public_channel,private_channel&limit=100&exclude_archived=true'),
+      slackFetch('conversations.list?types=im&limit=30'),
+      slackFetch('conversations.list?types=mpim&limit=20'),
+    ]);
+
+    if (!chanData.ok) throw new Error(chanData.error || 'Auth failed — check your token');
+
+    const allChannels = [
+      ...(chanData.channels || []),
+      ...(imData.channels  || []),
+      ...(mpimData.channels || []),
+    ];
+
+    // Resolve DM user names in one batch call
+    const dmList = allChannels.filter(c => c.is_im && c.user);
+    if (dmList.length > 0){
+      try {
+        const usersData = await slackFetch('users.list?limit=200');
+        if (usersData.ok){
+          const userMap = {};
+          (usersData.members || []).forEach(u => { userMap[u.id] = u.real_name || u.name || 'DM'; });
+          dmList.forEach(c => { c.name = userMap[c.user] || 'DM'; });
+        }
+      } catch(ue){ dmList.forEach(c => { c.name = c.name || 'DM'; }); }
+    }
+    // Name group DMs
+    allChannels.filter(c => c.is_mpim).forEach(c => {
+      c.name = c.name ? c.name.split('--').join(' · ') : 'Group DM';
+    });
+
+    // Filter: if channel names specified use those, otherwise show
+    // joined channels + ALL DMs that have messages (priority on DMs)
+    let channels;
+    if (channelNames.length){
+      channels = allChannels.filter(c =>
+        channelNames.includes(c.name) || channelNames.includes('#'+c.name)
+      );
+    } else {
+      const regularChans = allChannels.filter(c => !c.is_im && !c.is_mpim && c.is_member).slice(0, 6);
+      const dms          = allChannels.filter(c => c.is_im || c.is_mpim).slice(0, 10);
+      channels = [...dms, ...regularChans];
+    }
+
+    if (!channels.length){
+      feedEl.innerHTML = '<div class="empty"><div class="empty-icon">💬</div><div class="empty-txt">No matching channels found.<br>Check channel names in settings.</div></div>';
+      return;
+    }
+
+    // Fetch messages per channel
+    const feedItems = [];
+    for (const ch of channels){
+      try {
+        const histData = await slackFetch(`conversations.history?channel=${ch.id}&limit=3`);
+        if (!histData.ok) continue;
+        // Only take the latest message per channel — use channel's unread_count
+      const msgs = histData.messages || [];
+      if (msgs.length > 0){
+        const latest = msgs[0]; // already sorted newest first by Slack
+        feedItems.push({
+          channel: ch.name,
+          channelId: ch.id,
+          text: latest.text || '',
+          ts: latest.ts,
+          unread: ch.unread_count || 0,
+          isDM: !!(ch.is_im || ch.is_mpim),
+        });
+      }
+      } catch(ce){ continue; }
+    }
+
+    // Sort: within each channel take only the latest message
+    // Then separate into unread vs read, each sorted newest first
+    const unread = feedItems.filter(m => m.unread > 0)
+                            .sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
+    const read   = feedItems.filter(m => !m.unread)
+                            .sort((a,b) => parseFloat(b.ts) - parseFloat(a.ts));
+    slackData = [...unread, ...read];
+
+    // Badge — total unread count across all channels
+    const totalUnread = channels.reduce((s,c) => s+(c.unread_count||0), 0);
+    const badge = document.getElementById('msg-badge');
+    if (badge){ if (totalUnread > 0){ badge.style.display=''; badge.textContent=totalUnread; } else badge.style.display='none'; }
+
+    renderSlackFeed();
+  } catch(e){
+    feedEl.innerHTML = `<div style="padding:16px;color:var(--red);font-size:12px;text-align:center">
+      Error: ${esc(e.message)}<br>
+      <span style="color:var(--text3);font-size:11px">Check your token in ⚙️ settings</span>
+    </div>`;
+  }
+}
+
+function renderSlackFeed(){
+  const el = document.getElementById('slack-feed');
+  if (!slackData.length){
+    el.innerHTML = '<div class="empty"><div class="empty-icon">💬</div><div class="empty-txt">No messages found</div></div>';
+    return;
+  }
   const ws = SLACK_WORKSPACE || 'slack.com';
   el.innerHTML = slackData.map(m => {
     const time = new Date(parseFloat(m.ts)*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
